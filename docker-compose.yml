@@ -74,8 +74,10 @@ services:
     volumes:
       - certs:/etc/letsencrypt
       - certbot_webroot:/var/www/certbot
-      - ./scripts/init-certs.sh:/init-certs.sh:ro
-    entrypoint: /bin/sh /init-certs.sh
+    entrypoint: >-
+      /bin/sh -c 'if [ "$DOMAIN" = "localhost" ] || ! echo "$DOMAIN" | grep -q "\\.";
+      then echo "[certbot-init] local domain, skip LE"; exit 0; fi;
+      certbot certonly --webroot -w /var/www/certbot --email "$EMAIL" --agree-tos --non-interactive --keep-until-expiring -d "$DOMAIN"'
 
   certbot_renew:
     image: certbot/certbot:latest
@@ -86,8 +88,10 @@ services:
     volumes:
       - certs:/etc/letsencrypt
       - certbot_webroot:/var/www/certbot
-      - ./scripts/renew-certs.sh:/renew-certs.sh:ro
-    entrypoint: /bin/sh /renew-certs.sh
+    entrypoint: >-
+      /bin/sh -c 'if [ "$DOMAIN" = "localhost" ] || ! echo "$DOMAIN" | grep -q "\\.";
+      then echo "[certbot-renew] local domain, idle"; tail -f /dev/null; fi;
+      while true; do certbot renew --webroot -w /var/www/certbot --quiet || true; sleep 12h; done'
 
 volumes:
   postgres_data:
