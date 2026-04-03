@@ -6,6 +6,12 @@ services:
     depends_on:
       - postgres
       - redis
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "python scripts/wait_for_services.py postgres:5432 redis:6379 && gunicorn -k uvicorn.workers.UvicornWorker app.main:app -b 0.0.0.0:8000"
+      ]
 
   postgres:
     image: postgres:16
@@ -16,10 +22,20 @@ services:
       POSTGRES_PASSWORD: kyss
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kyss -d kysscheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   redis:
     image: redis:7
     container_name: kysscheck-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   celery_worker:
     build: .
@@ -28,7 +44,12 @@ services:
     depends_on:
       - redis
       - postgres
-    command: celery -A app.celery_app.celery_app worker --loglevel=info
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "python scripts/wait_for_services.py postgres:5432 redis:6379 && celery -A app.celery_app.celery_app worker --loglevel=info"
+      ]
 
   nginx:
     build:

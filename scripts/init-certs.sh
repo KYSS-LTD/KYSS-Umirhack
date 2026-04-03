@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
-set -eu
+set -e
+set -u
 
 : "${DOMAIN:=localhost}"
 : "${EMAIL:=admin@localhost}"

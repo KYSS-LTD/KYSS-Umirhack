@@ -20,6 +20,12 @@ cp .env.example .env
 docker-compose up --build
 ```
 
+
+## Docker runtime hardening и readiness
+- Backend и Celery ждут готовности `postgres:5432` и `redis:6379` перед запуском (`scripts/wait_for_services.py`).
+- Добавлены healthcheck для PostgreSQL и Redis в `docker-compose.yml`.
+- Python-контейнер (backend/worker) запускается не от root, а от пользователя `appuser` (UID 10001).
+
 ## HTTPS через Nginx (автоматически)
 Система расширена reverse proxy на Nginx:
 - `80` -> redirect на `443`
