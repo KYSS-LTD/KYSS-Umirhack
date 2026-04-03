@@ -3,8 +3,6 @@ services:
     build: .
     container_name: kysscheck-backend
     env_file: .env
-    ports:
-      - "8000:8000"
     depends_on:
       - postgres
       - redis
@@ -32,5 +30,45 @@ services:
       - postgres
     command: celery -A app.celery_app.celery_app worker --loglevel=info
 
+  nginx:
+    build:
+      context: ./nginx
+    container_name: kysscheck-nginx
+    env_file: .env
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - certs:/certs
+      - certbot_webroot:/var/www/certbot
+
+  certbot_init:
+    image: certbot/certbot:latest
+    container_name: kysscheck-certbot-init
+    env_file: .env
+    depends_on:
+      - nginx
+    volumes:
+      - certs:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+      - ./scripts/init-certs.sh:/init-certs.sh:ro
+    entrypoint: /bin/sh /init-certs.sh
+
+  certbot_renew:
+    image: certbot/certbot:latest
+    container_name: kysscheck-certbot-renew
+    env_file: .env
+    depends_on:
+      - nginx
+    volumes:
+      - certs:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+      - ./scripts/renew-certs.sh:/renew-certs.sh:ro
+    entrypoint: /bin/sh /renew-certs.sh
+
 volumes:
   postgres_data:
+  certs:
+  certbot_webroot:
