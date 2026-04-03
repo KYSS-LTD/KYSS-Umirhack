@@ -21,7 +21,7 @@ docker-compose up --build
 ```
 
 После старта:
-- dev ( `DOMAIN=localhost` или IP): `http://localhost` и `http://localhost:8000`
+- dev ( `DOMAIN=localhost` или IP): `http://localhost`, `http://localhost:8000`, `https://localhost`
 - production (домен): `https://<DOMAIN>`
 
 
@@ -38,7 +38,7 @@ docker-compose up --build
 
 ### Режимы сертификатов
 1. **Dev / локально/IP** (`DOMAIN=localhost`, IP или любой непубличный хост):
-   - Nginx работает в HTTP-режиме и проксирует backend на `80` и `8000`.
+   - Nginx проксирует backend на `80` и `8000` (HTTP) и поднимает `443` с self-signed сертификатом для локального HTTPS.
 2. **Production** (публичный домен, например `DOMAIN=monitor.example.com`):
    - Nginx поднимает HTTPS на `443` и делает redirect с `80`.
    - если сертификата ещё нет, временно создаётся self-signed сертификат, чтобы сервис стартовал.
