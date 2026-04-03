@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -e
 
 : "${DOMAIN:=localhost}"
 CERT_DIR="/certs/live/${DOMAIN}"

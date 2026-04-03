@@ -1,9 +1,7 @@
-#!/usr/bin/env sh
+#!/bin/sh
 set -e
-set -u
 
 : "${DOMAIN:=localhost}"
-: "${EMAIL:=admin@localhost}"
 
 if [ "$DOMAIN" = "localhost" ] || ! echo "$DOMAIN" | grep -q '\\.'; then
   echo "[certbot-renew] DOMAIN=$DOMAIN looks local; renewal loop skipped."
