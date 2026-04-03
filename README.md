@@ -1,24 +1,20 @@
 # KYSSCHECK
 
-KYSSCHECK — защищённая распределённая система диагностики инфраструктуры:
-- **Backend**: FastAPI (stateless), PostgreSQL, Redis, Celery
-- **Agent**: внешний клиент с подписью запросов Ed25519
-- **UI**: русскоязычная панель мониторинга
+KYSSCHECK — защищённая распределённая система диагностики инфраструктуры (backend + агенты).
 
-## Ключевая безопасность
-- Разделение аутентификации: агенты (Ed25519), пользователи (JWT)
-- Canonical JSON + `*timestamp` для подписи
-- Защита от replay (30 сек + nonce в Redis)
-- Только HTTPS (HTTP отклоняется)
-- Заголовки: HSTS, X-Frame-Options, X-Content-Type-Options
-- Белый список команд для `run_command`
-- Rate limiting через Redis
-- Маскирование и ограничение выводов (до 4000 символов)
+## Что реализовано
+- FastAPI backend (stateless), PostgreSQL, Redis, Celery worker.
+- Пользовательская аутентификация через JWT.
+- Аутентификация агентов через `Authorization: Bearer <agent_token>`.
+- Ed25519 подписи агентов сохранены и поддерживаются опционально (если агент отправляет подпись).
+- Replay защита (`timestamp` + `nonce` Redis), rate limit, HTTPS enforcement, security headers.
+- Безопасное выполнение задач агентом: whitelist типов задач + whitelist команд для `run_command`.
+- Русскоязычный UI: список агентов, карточка агента, список задач, создание задач, просмотр результатов/логов.
 
 ## Быстрый запуск
 ```bash
 cp .env.example .env
-# ВАЖНО: задайте безопасные JWT_SECRET и REGISTRATION_TOKEN
+# укажите безопасные JWT_SECRET и REGISTRATION_TOKEN
 
 docker-compose up --build
 ```
@@ -30,43 +26,45 @@ docker-compose up --build
 - `REGISTRATION_TOKEN`
 - `JWT_ACCESS_TTL_MINUTES`
 - `ALLOWED_COMMANDS`
+- `ALLOWED_TASK_TYPES`
+- `AGENT_OFFLINE_SECONDS`
+- `CORS_ORIGINS`
 
-## Основные маршруты
-- `POST /api/auth/login`
-- `POST /api/agents/register`
-- `POST /api/agents/heartbeat`
-- `POST /api/agents/tasks/next`
-- `POST /api/tasks`
-- `POST /api/tasks/result`
-- `GET /` — UI (русский интерфейс)
-
-## Агент
-### Установка (вариант 1)
+## Регистрация и запуск агента
+### Вариант 1 (скрипт установки)
 ```bash
 BASE_URL=https://your-server REGISTRATION_TOKEN=... bash scripts/install.sh
 ```
 
-### Ручной запуск
+### Вариант 2 (ручной запуск)
 ```bash
 python agent/agent.py --base-url https://your-server --registration-token YOUR_TOKEN
 ```
 
-## Модель задач
-Типы:
+При регистрации backend выдаёт:
+- `agent_id`
+- `agent_token`
+
+Агент сохраняет их в `~/.agent/config.json`.
+
+## API (основное)
+- `POST /api/auth/login` — JWT логин пользователя.
+- `POST /api/agents/register` — регистрация агента по `registration_token`.
+- `POST /api/agents/heartbeat` — heartbeat агента (Bearer token + опциональная Ed25519 подпись).
+- `POST /api/agents/tasks/next` — получение задачи агентом.
+- `POST /api/tasks/result` — отправка результата задачи агентом.
+- `POST /api/tasks` — создание задачи пользователем (JWT).
+
+## Поддерживаемые типы задач
 - `check_cpu`
 - `check_ram`
 - `check_disk`
-- `check_service`
-- `run_command` (строго из whitelist)
+- `check_ports`
+- `check_system_info`
+- `run_command` (только из whitelist `ALLOWED_COMMANDS`)
 
-Статусы: `pending -> assigned -> running -> done/failed`
-
-## Security checklist
-- [x] HTTPS enforced
-- [x] Agent request signing
-- [x] JWT for users
-- [x] No unsafe shell execution pattern (`shell=True` не используется)
-- [x] Rate limiting
-- [x] Replay protection
-- [x] Revocable agents
-- [x] Stateless backend
+## Надёжность
+- heartbeat каждые 5–10 сек;
+- агент помечается offline при отсутствии heartbeat;
+- базовый retry задачи при fail (`max_retries=1` по умолчанию);
+- timeout выполнения задач на агенте.

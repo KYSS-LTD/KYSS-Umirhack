@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8" /><title>KYSSCHECK — Агент</title></head>
+<body>
+  <h1>Агент {{ agent.agent_uid if agent else 'не найден' }}</h1>
+  {% if agent %}
+  <ul>
+    <li>Хост: {{ agent.hostname }}</li>
+    <li>Статус: {{ 'Online' if agent.is_online else 'Offline' }}</li>
+    <li>last_seen: {{ agent.last_seen_at }}</li>
+    <li>IP: {{ agent.ip_addresses or '-' }}</li>
+    <li>OS: {{ agent.os_version or '-' }}</li>
+    <li>Интерфейсы: {{ agent.network_interfaces or '-' }}</li>
+  </ul>
+  <h2>Последние задачи</h2>
+  <ul>{% for t in tasks %}<li>{{ t.task_uid }} - {{ t.status.value }} - {{ (t.logs or t.result or '-')[:100] }}</li>{% endfor %}</ul>
+  {% endif %}
+  <a href="/">Назад</a>
+</body>
+</html>

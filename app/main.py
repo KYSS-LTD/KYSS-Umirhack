@@ -1,13 +1,13 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.database import Base, engine
 from app.routers import agents, auth, tasks, ui
 
 settings = get_settings()
-app = FastAPI(title='KYSSCHECK')
+app = FastAPI(title='KYSSCHECK', docs_url=None, redoc_url=None, openapi_url=None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,11 +41,6 @@ async def security_middleware(request: Request, call_next):
 @app.get('/healthz')
 def healthz():
     return {'status': 'ok'}
-
-
-@app.get('/docs', include_in_schema=False)
-def docs_redirect():
-    return RedirectResponse('/redoc')
 
 
 app.include_router(auth.router)
