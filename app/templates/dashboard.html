@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>KYSSCHECK — Мониторинг</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; background: #f5f7fb; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .card { background: white; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+    .ok { color: green; }
+    .bad { color: #c0392b; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; border-bottom: 1px solid #e9ecef; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1>KYSSCHECK — Панель диагностики</h1>
+  <p><a href="/tasks/new">Создать задачу</a></p>
+  <div class="grid">
+    <div class="card">
+      <h2>Агенты</h2>
+      <table>
+        <thead><tr><th>ID</th><th>Хост</th><th>Статус</th><th>Последний heartbeat</th></tr></thead>
+        <tbody>
+        {% for a in agents %}
+          <tr>
+            <td><a href="/agents/{{ a.agent_uid }}">{{ a.agent_uid }}</a></td>
+            <td>{{ a.hostname }}</td>
+            <td class="{{ 'bad' if (a.revoked or not a.is_online) else 'ok' }}">{{ 'Offline/Отозван' if (a.revoked or not a.is_online) else 'Online' }}</td>
+            <td>{{ a.last_seen_at or '-' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Оповещения</h2>
+      {% if alerts %}
+        <ul>{% for a in alerts %}<li class="bad">Проблема с агентом {{ a.agent_uid }}</li>{% endfor %}</ul>
+      {% else %}
+        <p class="ok">Критичных оповещений нет</p>
+      {% endif %}
+    </div>
+
+    <div class="card" style="grid-column: span 2;">
+      <h2>Задачи</h2>
+      <table>
+        <thead><tr><th>task_id</th><th>Тип</th><th>Агент</th><th>Статус</th><th>Результат/логи</th></tr></thead>
+        <tbody>
+        {% for t in tasks %}
+          <tr>
+            <td>{{ t.task_uid }}</td>
+            <td>{{ t.task_type }}</td>
+            <td>{{ t.agent.agent_uid if t.agent else 'любой' }}</td>
+            <td>{{ t.status.value }}</td>
+            <td>{{ (t.logs or t.result or '-')[:120] }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

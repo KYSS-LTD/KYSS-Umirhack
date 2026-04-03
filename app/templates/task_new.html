@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8" /><title>KYSSCHECK — Новая задача</title></head>
+<body>
+  <h1>Создать задачу</h1>
+  <form method="post" action="/tasks/new">
+    <label>Тип:</label>
+    <select name="task_type">
+      {% for t in allowed_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+    </select><br/>
+    <label>Команда (только для run_command из whitelist):</label>
+    <input type="text" name="command" /><br/>
+    <label>Назначить агенту:</label>
+    <select name="agent_uid">
+      <option value="">любой</option>
+      {% for a in agents %}<option value="{{ a.agent_uid }}">{{ a.hostname }} ({{ a.agent_uid }})</option>{% endfor %}
+    </select><br/>
+    <button type="submit">Создать</button>
+  </form>
+  <a href="/">Назад</a>
+</body>
+</html>
