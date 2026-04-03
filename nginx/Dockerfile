@@ -1,14 +1,9 @@
 FROM nginx:1.27-alpine
 
-# Устанавливаем bash, openssl и gettext
-RUN apk add --no-cache bash openssl gettext
+# openssl нужен для fallback self-signed сертификата
+RUN apk add --no-cache bash openssl
 
-# Копируем конфиг-шаблон и entrypoint
-COPY nginx.conf.template /etc/nginx/templates/nginx.conf.template
 COPY nginx-entrypoint.sh /nginx-entrypoint.sh
-
-# Делаем скрипт исполняемым
 RUN chmod +x /nginx-entrypoint.sh
 
-# Запуск через bash entrypoint
 ENTRYPOINT ["/nginx-entrypoint.sh"]

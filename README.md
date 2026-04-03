@@ -20,6 +20,10 @@ cp .env.example .env
 docker-compose up --build
 ```
 
+После старта:
+- dev ( `DOMAIN=localhost` или IP): `http://localhost` и `http://localhost:8000`
+- production (домен): `https://<DOMAIN>`
+
 
 ## Docker runtime hardening и readiness
 - Backend и Celery ждут готовности `postgres:5432` и `redis:6379` перед запуском (`scripts/wait_for_services.py`).
@@ -33,11 +37,12 @@ docker-compose up --build
 - сертификаты и challenge-файлы хранятся в docker volumes (`certs`, `certbot_webroot`)
 
 ### Режимы сертификатов
-1. **Dev / локально** (`DOMAIN=localhost` или без публичной зоны):
-   - автоматически генерируется self-signed сертификат при старте Nginx.
+1. **Dev / локально/IP** (`DOMAIN=localhost`, IP или любой непубличный хост):
+   - Nginx работает в HTTP-режиме и проксирует backend на `80` и `8000`.
 2. **Production** (публичный домен, например `DOMAIN=monitor.example.com`):
-   - `certbot_init` автоматически запрашивает Let's Encrypt сертификат (`EMAIL` обязателен).
-   - `certbot_renew` выполняет периодическое обновление сертификатов.
+   - Nginx поднимает HTTPS на `443` и делает redirect с `80`.
+   - если сертификата ещё нет, временно создаётся self-signed сертификат, чтобы сервис стартовал.
+   - `certbot_init` запрашивает Let's Encrypt сертификат (`EMAIL` обязателен), `certbot_renew` выполняет обновления.
 
 > Для production домен должен указывать на сервер, а порты 80/443 должны быть доступны извне.
 

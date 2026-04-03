@@ -1,30 +1,102 @@
 #!/usr/bin/env bash
 set -eu
 
-# Переменные окружения
 : "${DOMAIN:=localhost}"
-: "${EMAIL:=admin@localhost}"
 
-# Если локальный домен, пропускаем Let's Encrypt
-if [[ "$DOMAIN" == "localhost" ]] || ! [[ "$DOMAIN" =~ \. ]]; then
-  echo "[certbot-init] DOMAIN=$DOMAIN looks local; Let's Encrypt skipped."
-  exec nginx -g 'daemon off;'
+is_public_domain="false"
+if [[ "$DOMAIN" == "localhost" ]]; then
+  is_public_domain="false"
+elif [[ "$DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  is_public_domain="false"
+elif [[ "$DOMAIN" =~ \. ]]; then
+  is_public_domain="true"
 fi
 
-echo "[certbot-init] Requesting Let's Encrypt certificate for $DOMAIN"
+mkdir -p /etc/nginx/conf.d
 
-# Создаём директорию для certbot, если нет
-mkdir -p /var/www/certbot
+if [[ "$is_public_domain" == "true" ]]; then
+  cert_dir="/certs/live/${DOMAIN}"
+  cert_file="${cert_dir}/fullchain.pem"
+  key_file="${cert_dir}/privkey.pem"
 
-# Запрос сертификата
-certbot certonly \
-  --webroot \
-  -w /var/www/certbot \
-  --email "$EMAIL" \
-  --agree-tos \
-  --non-interactive \
-  --keep-until-expiring \
-  -d "$DOMAIN"
+  if [[ ! -f "$cert_file" || ! -f "$key_file" ]]; then
+    echo "[nginx-entrypoint] No TLS certs for ${DOMAIN}; creating temporary self-signed certificate."
+    mkdir -p "$cert_dir"
+    openssl req -x509 -nodes -newkey rsa:2048 -days 7 \
+      -subj "/CN=${DOMAIN}" \
+      -keyout "$key_file" \
+      -out "$cert_file"
+  fi
 
-# Запускаем nginx после получения сертификата
+  cat > /etc/nginx/conf.d/default.conf <<NGINX_CONF
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN};
+
+    ssl_certificate ${cert_file};
+    ssl_certificate_key ${key_file};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    client_max_body_size 5m;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        proxy_pass http://backend:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 30s;
+        proxy_read_timeout 60s;
+    }
+}
+NGINX_CONF
+else
+  echo "[nginx-entrypoint] DOMAIN=${DOMAIN} is local/IP; starting HTTP-only reverse proxy on ports 80 and 8000."
+
+  cat > /etc/nginx/conf.d/default.conf <<'NGINX_CONF'
+server {
+    listen 80;
+    listen 8000;
+    server_name _;
+
+    client_max_body_size 5m;
+
+    location / {
+        proxy_pass http://backend:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_connect_timeout 30s;
+        proxy_read_timeout 60s;
+    }
+}
+NGINX_CONF
+fi
+
+nginx -t
 exec nginx -g 'daemon off;'
