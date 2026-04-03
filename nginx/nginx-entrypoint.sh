@@ -1,19 +1,30 @@
-#!/bin/sh
-set -e
+#!/usr/bin/env bash
+set -eu
 
+# Переменные окружения
 : "${DOMAIN:=localhost}"
-CERT_DIR="/certs/live/${DOMAIN}"
-mkdir -p /etc/nginx/conf.d /var/www/certbot "$CERT_DIR"
+: "${EMAIL:=admin@localhost}"
 
-if [ ! -f "$CERT_DIR/fullchain.pem" ] || [ ! -f "$CERT_DIR/privkey.pem" ]; then
-  echo "[nginx] No certificate found for ${DOMAIN}, generating self-signed fallback..."
-  openssl req -x509 -nodes -newkey rsa:2048 -days 30 \
-    -keyout "$CERT_DIR/privkey.pem" \
-    -out "$CERT_DIR/fullchain.pem" \
-    -subj "/CN=${DOMAIN}" >/dev/null 2>&1
+# Если локальный домен, пропускаем Let's Encrypt
+if [[ "$DOMAIN" == "localhost" ]] || ! [[ "$DOMAIN" =~ \. ]]; then
+  echo "[certbot-init] DOMAIN=$DOMAIN looks local; Let's Encrypt skipped."
+  exec nginx -g 'daemon off;'
 fi
 
-envsubst '${DOMAIN}' < /etc/nginx/templates/nginx.conf.template > /etc/nginx/conf.d/default.conf
+echo "[certbot-init] Requesting Let's Encrypt certificate for $DOMAIN"
 
-echo "[nginx] Starting with domain: ${DOMAIN}"
+# Создаём директорию для certbot, если нет
+mkdir -p /var/www/certbot
+
+# Запрос сертификата
+certbot certonly \
+  --webroot \
+  -w /var/www/certbot \
+  --email "$EMAIL" \
+  --agree-tos \
+  --non-interactive \
+  --keep-until-expiring \
+  -d "$DOMAIN"
+
+# Запускаем nginx после получения сертификата
 exec nginx -g 'daemon off;'
