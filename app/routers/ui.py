@@ -9,7 +9,6 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.models import Agent, Task
 from app.repositories.repositories import create_task, mark_offline_agents
-from app.services.auth_services import get_current_user
 
 router = APIRouter(tags=['ui'])
 templates = Jinja2Templates(directory='app/templates')
@@ -17,7 +16,7 @@ settings = get_settings()
 
 
 @router.get('/', response_class=HTMLResponse)
-def dashboard(request: Request, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def dashboard(request: Request, db: Session = Depends(get_db)):
     mark_offline_agents(db, settings.agent_offline_seconds)
     agents = db.query(Agent).order_by(Agent.last_seen_at.desc()).all()
     tasks = db.query(Task).order_by(Task.created_at.desc()).limit(50).all()
@@ -26,14 +25,14 @@ def dashboard(request: Request, db: Session = Depends(get_db), _=Depends(get_cur
 
 
 @router.get('/agents/{agent_uid}', response_class=HTMLResponse)
-def agent_detail(agent_uid: str, request: Request, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def agent_detail(agent_uid: str, request: Request, db: Session = Depends(get_db)):
     agent = db.query(Agent).filter(Agent.agent_uid == agent_uid).first()
     tasks = db.query(Task).filter(Task.agent_id == agent.id).order_by(Task.created_at.desc()).limit(50).all() if agent else []
     return templates.TemplateResponse('agent_detail.html', {'request': request, 'agent': agent, 'tasks': tasks})
 
 
 @router.get('/tasks/new', response_class=HTMLResponse)
-def new_task_page(request: Request, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def new_task_page(request: Request, db: Session = Depends(get_db)):
     agents = db.query(Agent).order_by(Agent.hostname.asc()).all()
     return templates.TemplateResponse('task_new.html', {'request': request, 'agents': agents, 'allowed_types': sorted(settings.allowed_task_type_set)})
 
@@ -45,7 +44,6 @@ def create_task_form(
     command: str = Form(''),
     agent_uid: str = Form(''),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
 ):
     if task_type not in settings.allowed_task_type_set:
         return RedirectResponse(url='/tasks/new', status_code=303)
