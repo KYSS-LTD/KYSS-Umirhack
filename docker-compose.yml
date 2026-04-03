@@ -1,0 +1,36 @@
+services:
+  backend:
+    build: .
+    container_name: kysscheck-backend
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16
+    container_name: kysscheck-postgres
+    environment:
+      POSTGRES_DB: kysscheck
+      POSTGRES_USER: kyss
+      POSTGRES_PASSWORD: kyss
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: kysscheck-redis
+
+  celery_worker:
+    build: .
+    container_name: kysscheck-worker
+    env_file: .env
+    depends_on:
+      - redis
+      - postgres
+    command: celery -A app.celery_app.celery_app worker --loglevel=info
+
+volumes:
+  postgres_data:
