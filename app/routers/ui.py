@@ -7,20 +7,28 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.security import create_access_token, hash_password, verify_password
-from app.models.models import Agent, Task
+from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
+from app.models.models import Agent, Task, User
 from app.repositories.repositories import create_task, create_user, get_user_by_username, mark_offline_agents
-from app.services.auth_services import get_current_user
 
 router = APIRouter(tags=['ui'])
 templates = Jinja2Templates(directory='app/templates')
 settings = get_settings()
 
 
-def _redirect_if_guest(request: Request):
-    if not request.cookies.get('access_token'):
+def _get_ui_user_or_redirect(request: Request, db: Session) -> User | RedirectResponse:
+    token = request.cookies.get('access_token')
+    if not token:
         return RedirectResponse(url='/login', status_code=303)
-    return None
+
+    username = decode_access_token(token)
+    if not username:
+        return RedirectResponse(url='/login', status_code=303)
+
+    user = get_user_by_username(db, username)
+    if not user or not user.is_active:
+        return RedirectResponse(url='/login', status_code=303)
+    return user
 
 
 @router.get('/login', response_class=HTMLResponse)
@@ -76,10 +84,10 @@ def logout():
 
 
 @router.get('/', response_class=HTMLResponse)
-def dashboard(request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    guest_redirect = _redirect_if_guest(request)
-    if guest_redirect:
-        return guest_redirect
+def dashboard(request: Request, db: Session = Depends(get_db)):
+    current_user = _get_ui_user_or_redirect(request, db)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
 
     mark_offline_agents(db, settings.agent_offline_seconds)
     agents = db.query(Agent).order_by(Agent.last_seen_at.desc()).all()
@@ -89,10 +97,10 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user=Depe
 
 
 @router.get('/agents/{agent_uid}', response_class=HTMLResponse)
-def agent_detail(agent_uid: str, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    guest_redirect = _redirect_if_guest(request)
-    if guest_redirect:
-        return guest_redirect
+def agent_detail(agent_uid: str, request: Request, db: Session = Depends(get_db)):
+    current_user = _get_ui_user_or_redirect(request, db)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
 
     agent = db.query(Agent).filter(Agent.agent_uid == agent_uid).first()
     tasks = db.query(Task).filter(Task.agent_id == agent.id).order_by(Task.created_at.desc()).limit(50).all() if agent else []
@@ -100,10 +108,10 @@ def agent_detail(agent_uid: str, request: Request, db: Session = Depends(get_db)
 
 
 @router.get('/tasks/new', response_class=HTMLResponse)
-def new_task_page(request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    guest_redirect = _redirect_if_guest(request)
-    if guest_redirect:
-        return guest_redirect
+def new_task_page(request: Request, db: Session = Depends(get_db)):
+    current_user = _get_ui_user_or_redirect(request, db)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
 
     agents = db.query(Agent).order_by(Agent.hostname.asc()).all()
     return templates.TemplateResponse(
@@ -119,11 +127,10 @@ def create_task_form(
     command: str = Form(''),
     agent_uid: str = Form(''),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
 ):
-    guest_redirect = _redirect_if_guest(request)
-    if guest_redirect:
-        return guest_redirect
+    current_user = _get_ui_user_or_redirect(request, db)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
 
     if task_type not in settings.allowed_task_type_set:
         return RedirectResponse(url='/tasks/new', status_code=303)
