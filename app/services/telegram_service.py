@@ -3,10 +3,11 @@ import uuid
 from datetime import datetime
 
 import httpx
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, engine
 from app.models.models import Agent, Task, TaskStatus, TelegramIntegrationSettings
 
 settings = get_settings()
@@ -16,9 +17,23 @@ class TelegramService:
     def __init__(self):
         self._offset = 0
         self._prepared_token: str | None = None
+        self._schema_checked = False
 
-    @staticmethod
-    def get_or_create_config(db: Session) -> TelegramIntegrationSettings:
+    def _ensure_schema(self) -> None:
+        if self._schema_checked:
+            return
+        insp = inspect(engine)
+        if 'telegram_integration_settings' not in insp.get_table_names():
+            self._schema_checked = True
+            return
+        cols = {c['name'] for c in insp.get_columns('telegram_integration_settings')}
+        if 'events_thread_id' not in cols:
+            with engine.begin() as conn:
+                conn.execute(text('ALTER TABLE telegram_integration_settings ADD COLUMN events_thread_id INTEGER'))
+        self._schema_checked = True
+
+    def get_or_create_config(self, db: Session) -> TelegramIntegrationSettings:
+        self._ensure_schema()
         cfg = db.query(TelegramIntegrationSettings).first()
         if cfg:
             return cfg
