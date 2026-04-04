@@ -78,6 +78,7 @@ def next_task(
     limit_request(request, scope=f'tasks-next:{bearer_agent.agent_uid}', limit=120)
     agent = get_agent_and_validate_uid(db, bearer_agent, envelope.agent_uid)
     verify_agent_signature_if_present(agent, envelope.payload, envelope.timestamp, envelope.signature, envelope.nonce)
+    touch_agent(db, agent, payload=envelope.payload)
     mark_offline_agents(db, offline_seconds=settings.agent_offline_seconds)
     fail_running_tasks_for_offline_agents(db)
     fail_stale_running_tasks(db, timeout_seconds=settings.task_execution_timeout_seconds)

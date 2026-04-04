@@ -60,6 +60,8 @@ def submit_result(
     limit_request(request, scope=f'task-result:{bearer_agent.agent_uid}', limit=120)
     agent = get_agent_and_validate_uid(db, bearer_agent, envelope.agent_uid)
     verify_agent_signature_if_present(agent, envelope.payload, envelope.timestamp, envelope.signature, envelope.nonce)
+    agent.last_seen_at = datetime.utcnow()
+    agent.is_online = True
 
     task_uid = envelope.payload.get('task_uid')
     task = get_task_by_uid(db, task_uid)
