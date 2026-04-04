@@ -23,18 +23,30 @@ def _get_ui_user_or_redirect(request: Request, db: Session) -> User | RedirectRe
 
     username = decode_access_token(token)
     if not username:
-        return RedirectResponse(url='/login', status_code=303)
+        response = RedirectResponse(url='/login', status_code=303)
+        response.delete_cookie('access_token')
+        return response
 
     user = get_user_by_username(db, username)
     if not user or not user.is_active:
-        return RedirectResponse(url='/login', status_code=303)
+        response = RedirectResponse(url='/login', status_code=303)
+        response.delete_cookie('access_token')
+        return response
     return user
 
 
 @router.get('/login', response_class=HTMLResponse)
-def login_page(request: Request):
-    if request.cookies.get('access_token'):
-        return RedirectResponse(url='/', status_code=303)
+def login_page(request: Request, db: Session = Depends(get_db)):
+    token = request.cookies.get('access_token')
+    if token:
+        username = decode_access_token(token)
+        user = get_user_by_username(db, username) if username else None
+        if user and user.is_active:
+            return RedirectResponse(url='/', status_code=303)
+
+        response = templates.TemplateResponse('login.html', {'request': request, 'error': None})
+        response.delete_cookie('access_token')
+        return response
     return templates.TemplateResponse('login.html', {'request': request, 'error': None})
 
 
@@ -51,9 +63,17 @@ def login_submit(request: Request, username: str = Form(...), password: str = Fo
 
 
 @router.get('/register', response_class=HTMLResponse)
-def register_page(request: Request):
-    if request.cookies.get('access_token'):
-        return RedirectResponse(url='/', status_code=303)
+def register_page(request: Request, db: Session = Depends(get_db)):
+    token = request.cookies.get('access_token')
+    if token:
+        username = decode_access_token(token)
+        user = get_user_by_username(db, username) if username else None
+        if user and user.is_active:
+            return RedirectResponse(url='/', status_code=303)
+
+        response = templates.TemplateResponse('register.html', {'request': request, 'error': None})
+        response.delete_cookie('access_token')
+        return response
     return templates.TemplateResponse('register.html', {'request': request, 'error': None})
 
 
