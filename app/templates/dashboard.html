@@ -15,7 +15,7 @@
   <a class="btn btn-primary" href="/tasks/new">Создать задачу</a>
 </div>
 
-<div class="row g-3 mb-1">
+<div class="row g-3 mb-1" id="metricsRow">
   <div class="col-6 col-lg-3">
     <div class="card p-3 stat-card">
       <div class="text-secondary small">Online агенты</div>
@@ -102,7 +102,7 @@
       <div class="table-responsive">
         <table class="table align-middle mb-0">
           <thead><tr><th>ID</th><th>Имя/хост</th><th>IP сервера</th><th>Статус</th><th>Последний heartbeat</th></tr></thead>
-          <tbody>
+          <tbody id="agentsTableBody">
           {% for a in agents %}
             <tr>
               <td class="mono"><a href="/agents/{{ a.agent_uid }}">{{ a.agent_uid }}</a></td>
@@ -129,7 +129,7 @@
   <div class="col-12 col-lg-4">
     <div class="card p-3 h-100">
       <h2 class="h5 mb-3">История отвалов/восстановлений</h2>
-      <div class="timeline-list">
+      <div class="timeline-list" id="eventsTimeline">
         {% for e in events %}
           <div class="timeline-item small">
             <div>
@@ -157,7 +157,7 @@
       <div class="table-responsive">
         <table class="table align-middle mb-0">
           <thead><tr><th>task_id</th><th>Тип</th><th>Агент</th><th>Статус</th><th>Результат/логи</th></tr></thead>
-          <tbody>
+          <tbody id="tasksTableBody">
           {% for t in tasks %}
             <tr>
               <td class="mono"><a href="/tasks/detail/{{ t.task_uid }}">{{ t.task_uid }}</a></td>
@@ -224,6 +224,38 @@
 
   drawTopology({{ topology_json | safe }});
 
+  async function refreshDashboardSections() {
+    try {
+      const resp = await fetch(`${window.location.pathname}${window.location.search}`, {
+        headers: {
+          'Accept': 'text/html',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        cache: 'no-store'
+      });
+      if (!resp.ok) return;
+      const html = await resp.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+
+      const map = [
+        ['#metricsRow', '#metricsRow'],
+        ['#agentsTableBody', '#agentsTableBody'],
+        ['#eventsTimeline', '#eventsTimeline'],
+        ['#tasksTableBody', '#tasksTableBody'],
+      ];
+      map.forEach(([targetSel, sourceSel]) => {
+        const target = document.querySelector(targetSel);
+        const source = doc.querySelector(sourceSel);
+        if (target && source) {
+          target.innerHTML = source.innerHTML;
+        }
+      });
+    } catch (e) {
+      console.debug('dashboard auto-refresh failed', e);
+    }
+  }
+
   async function pollTopology() {
     try {
       const resp = await fetch('/api/ui/topology', {headers: {'Accept': 'application/json'}});
@@ -235,6 +267,7 @@
     }
   }
   setInterval(pollTopology, 4000);
+  setInterval(refreshDashboardSections, 4000);
 
   const statusCtx = document.getElementById('taskStatusChart');
   if (statusCtx) {
