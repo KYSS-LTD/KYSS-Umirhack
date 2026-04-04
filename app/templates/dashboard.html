@@ -65,12 +65,9 @@
       <label class="form-label mb-1">Тип задачи</label>
       <select class="form-select" name="task_type">
         <option value="all" {% if filters.task_type == 'all' %}selected{% endif %}>все</option>
-        <option value="check_cpu" {% if filters.task_type == 'check_cpu' %}selected{% endif %}>check_cpu</option>
-        <option value="check_ram" {% if filters.task_type == 'check_ram' %}selected{% endif %}>check_ram</option>
-        <option value="check_disk" {% if filters.task_type == 'check_disk' %}selected{% endif %}>check_disk</option>
-        <option value="check_ports" {% if filters.task_type == 'check_ports' %}selected{% endif %}>check_ports</option>
-        <option value="check_system_info" {% if filters.task_type == 'check_system_info' %}selected{% endif %}>check_system_info</option>
-        <option value="run_command" {% if filters.task_type == 'run_command' %}selected{% endif %}>run_command</option>
+        {% for t in allowed_types %}
+          <option value="{{ t }}" {% if filters.task_type == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
       </select>
     </div>
     <div class="col-12 col-md-2 d-grid">
@@ -183,24 +180,35 @@
 <script>
   const data = {{ chart_data_json | safe }};
 
-  const topo = {{ topology_json | safe }};
   const svg = document.getElementById('topologySvg');
-  if (svg) {
-    const ns = 'http://www.w3.org/2000/svg';
-    const cx = 250, cy = 180;
+  const ns = 'http://www.w3.org/2000/svg';
+
+  function drawTopology(nodes) {
+    if (!svg) return;
+    svg.innerHTML = '';
     const backend = document.createElementNS(ns, 'g');
-    backend.innerHTML = '<circle cx="250" cy="180" r="32" fill="#2563eb"/><text x="250" y="185" text-anchor="middle" fill="#fff" font-size="11">BACKEND</text>';
+    backend.innerHTML = '<circle cx="250" cy="180" r="34" fill="#1d4ed8"/><text x="250" y="185" text-anchor="middle" fill="#fff" font-size="11">BACKEND</text>';
     svg.appendChild(backend);
-    topo.forEach((node) => {
+
+    nodes.forEach((node, idx) => {
       const line = document.createElementNS(ns, 'line');
-      line.setAttribute('x1', cx); line.setAttribute('y1', cy);
+      line.setAttribute('x1', '250'); line.setAttribute('y1', '180');
       line.setAttribute('x2', node.x); line.setAttribute('y2', node.y);
-      line.setAttribute('stroke', '#94a3b8'); line.setAttribute('stroke-width', '1.5');
+      line.setAttribute('stroke', node.online ? '#22c55e' : '#ef4444');
+      line.setAttribute('stroke-width', '2');
+      line.setAttribute('opacity', '0.75');
       svg.appendChild(line);
+
+      const pulse = document.createElementNS(ns, 'circle');
+      pulse.setAttribute('cx', node.x); pulse.setAttribute('cy', node.y);
+      pulse.setAttribute('r', node.online ? '20' : '0');
+      pulse.setAttribute('fill', node.online ? 'rgba(34,197,94,0.25)' : 'transparent');
+      pulse.innerHTML = '<animate attributeName="r" values="16;22;16" dur="1.8s" repeatCount="indefinite" />';
+      svg.appendChild(pulse);
 
       const circle = document.createElementNS(ns, 'circle');
       circle.setAttribute('cx', node.x); circle.setAttribute('cy', node.y);
-      circle.setAttribute('r', '16');
+      circle.setAttribute('r', '15');
       circle.setAttribute('fill', node.online ? '#16a34a' : '#dc2626');
       svg.appendChild(circle);
 
@@ -213,6 +221,20 @@
       svg.appendChild(label);
     });
   }
+
+  drawTopology({{ topology_json | safe }});
+
+  async function pollTopology() {
+    try {
+      const resp = await fetch('/api/ui/topology', {headers: {'Accept': 'application/json'}});
+      if (!resp.ok) return;
+      const payload = await resp.json();
+      drawTopology(payload.nodes || []);
+    } catch (e) {
+      console.debug('topology polling failed', e);
+    }
+  }
+  setInterval(pollTopology, 4000);
 
   const statusCtx = document.getElementById('taskStatusChart');
   if (statusCtx) {

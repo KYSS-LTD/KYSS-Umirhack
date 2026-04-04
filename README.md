@@ -124,3 +124,60 @@ python agent/agent.py --base-url https://your-domain-or-host --registration-toke
 - при `401 Unauthorized` агент сам перерегистрируется и обновляет `agent_token`;
 - базовый retry задачи при fail (`max_retries=1` по умолчанию);
 - timeout выполнения задач на агенте.
+
+## Новые task types (итерация N)
+### Системные
+- `check_cpu_advanced`
+- `check_memory_advanced`
+- `check_disk_advanced`
+- `check_processes_top`
+- `check_uptime_reboot`
+
+### Сеть
+- `check_network_reachability`
+- `check_ports_latency`
+- `check_dns`
+- `check_traceroute_basic`
+
+### Сервисы/интеграции
+- `check_services_status`
+- `check_http_endpoint`
+- `check_database_connectivity`
+
+### Security/Snapshot/Диагностика
+- `check_security_baseline`
+- `system_snapshot`
+- `system_snapshot_diff`
+- `check_logs_keywords`
+- `check_paths_sizes`
+
+## Примеры payload для новых задач
+```json
+{
+  "task_uid": "cpu-adv-001",
+  "task_type": "check_cpu_advanced",
+  "agent_uid": "agent-1"
+}
+```
+
+```json
+{
+  "task_uid": "http-001",
+  "task_type": "check_http_endpoint",
+  "command": "{\"url\":\"https://example.com/health\",\"timeout\":3,\"verify_tls\":true}",
+  "agent_uid": "agent-1"
+}
+```
+
+```json
+{
+  "task_uid": "snapshot-diff-001",
+  "task_type": "system_snapshot_diff",
+  "command": "{\"snapshot_dir\":\"/root/.agent/snapshots\"}",
+  "agent_uid": "agent-1"
+}
+```
+
+## Changelog (что было / что стало)
+- Было: только базовые проверки (`check_cpu/check_ram/check_disk/check_ports/check_system_info`) и статичная схема топологии.
+- Стало: расширенные системные/сетевые/service/security/snapshot-проверки, JSON summary (`OK/WARN/CRIT`), diff состояния, polling топологии каждые 4 секунды с heartbeat-анимацией.

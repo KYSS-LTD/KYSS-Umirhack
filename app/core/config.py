@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     jwt_access_ttl_minutes: int = 20
     registration_token: str
     allowed_commands: str = 'uptime,df -h,free -m'
-    allowed_task_types: str = 'check_cpu,check_ram,check_disk,check_ports,check_system_info,run_command'
+    allowed_task_types: str = 'check_cpu,check_ram,check_disk,check_ports,check_system_info,run_command,check_cpu_advanced,check_memory_advanced,check_disk_advanced,check_processes_top,check_uptime_reboot,check_network_reachability,check_ports_latency,check_dns,check_traceroute_basic,check_services_status,check_http_endpoint,check_database_connectivity,check_security_baseline,system_snapshot,system_snapshot_diff,check_logs_keywords,check_paths_sizes'
     cors_origins: str = 'http://localhost:8000'
     enforce_https: bool = True
     agent_offline_seconds: int = 25
