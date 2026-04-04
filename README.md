@@ -115,6 +115,7 @@ python agent/agent.py --base-url https://your-domain-or-host --registration-toke
 - Для администратора доступна страница `/settings/telegram`:
   - `bot_token` бота;
   - `chat_id` группы;
+  - `thread_id` (опционально, для групп с topics);
   - переключатель дублирования `online/offline` событий.
 - Когда бот добавлен в группу, команда `/start` или `/chatid` покажет `chat_id`, который нужно вставить в настройки.
 - Команды бота:

@@ -459,6 +459,7 @@ def telegram_settings_save(
     request: Request,
     bot_token: str = Form(''),
     chat_id: str = Form(''),
+    events_thread_id: str = Form(''),
     events_enabled: str = Form('off'),
     db: Session = Depends(get_db),
 ):
@@ -470,6 +471,7 @@ def telegram_settings_save(
     cfg = telegram_service.get_or_create_config(db)
     cfg.bot_token = bot_token.strip()[:255] or None
     cfg.chat_id = chat_id.strip()[:64] or None
+    cfg.events_thread_id = int(events_thread_id.strip()) if events_thread_id.strip().lstrip('-').isdigit() else None
     cfg.events_enabled = events_enabled == 'on'
     db.commit()
     telegram_service.reload_config()
