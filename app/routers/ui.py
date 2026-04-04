@@ -1,6 +1,7 @@
 import json
 import math
 import uuid
+import asyncio
 from collections import Counter
 from datetime import datetime, timedelta
 
@@ -471,4 +472,11 @@ def telegram_settings_save(
     cfg.chat_id = chat_id.strip()[:64] or None
     cfg.events_enabled = events_enabled == 'on'
     db.commit()
+    telegram_service.reload_config()
+    if cfg.bot_token and cfg.chat_id:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(telegram_service.send_config_saved_message(cfg.bot_token, cfg.chat_id))
+        except RuntimeError:
+            asyncio.run(telegram_service.send_config_saved_message(cfg.bot_token, cfg.chat_id))
     return RedirectResponse(url='/settings/telegram', status_code=303)
