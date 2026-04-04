@@ -29,18 +29,56 @@ class TelegramService:
         return cfg
 
     @staticmethod
-    async def send_message(bot_token: str, chat_id: str, text: str, message_thread_id: int | None = None) -> None:
+    async def send_message(
+        bot_token: str,
+        chat_id: str,
+        text: str,
+        message_thread_id: int | None = None,
+        reply_markup: dict | None = None,
+    ) -> bool:
         if not bot_token or not chat_id:
-            return
+            return False
         url = f'https://api.telegram.org/bot{bot_token}/sendMessage'
         payload = {'chat_id': chat_id, 'text': text}
         if isinstance(message_thread_id, int):
             payload['message_thread_id'] = message_thread_id
+        if reply_markup:
+            payload['reply_markup'] = reply_markup
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
-                await client.post(url, json=payload)
+                response = await client.post(url, json=payload)
+                data = response.json() if 'application/json' in response.headers.get('content-type', '') else {}
+                return bool(response.status_code == 200 and data.get('ok'))
         except Exception:
-            return
+            return False
+
+    @staticmethod
+    async def edit_message(
+        bot_token: str,
+        chat_id: str,
+        message_id: int,
+        text: str,
+        reply_markup: dict | None = None,
+    ) -> None:
+        url = f'https://api.telegram.org/bot{bot_token}/editMessageText'
+        payload = {'chat_id': chat_id, 'message_id': message_id, 'text': text}
+        if reply_markup:
+            payload['reply_markup'] = reply_markup
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            await client.post(url, json=payload)
+
+    @staticmethod
+    async def answer_callback(bot_token: str, callback_query_id: str) -> None:
+        url = f'https://api.telegram.org/bot{bot_token}/answerCallbackQuery'
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            await client.post(url, json={'callback_query_id': callback_query_id})
+
+    def reload_config(self) -> None:
+        self._offset = 0
+        self._prepared_token = None
+
+    async def send_config_saved_message(self, bot_token: str, chat_id: str) -> None:
+        await self.send_message(bot_token, chat_id, '✅ Настройки Telegram обновлены. Бот перезапущен и готов к работе.')
 
     @staticmethod
     def _fmt_event(event_type: str, agent_uid: str, details: str | None) -> str:
@@ -102,33 +140,64 @@ class TelegramService:
                 return
 
             if command == '/run':
-                parts = text.split()
-                if len(parts) < 2:
-                    await self.send_message(bot_token, chat_id, 'Использование: /run <task_type> [agent_uid]', message_thread_id=message_thread_id)
-                    return
-                task_type = parts[1].strip()
-                if task_type not in settings.allowed_task_type_set:
-                    await self.send_message(bot_token, chat_id, f'Недопустимый task_type: {task_type}', message_thread_id=message_thread_id)
-                    return
-                agent_uid = parts[2].strip() if len(parts) > 2 else ''
-                if agent_uid:
-                    agent = db.query(Agent).filter(Agent.agent_uid == agent_uid).first()
-                    if not agent:
-                        await self.send_message(bot_token, chat_id, f'Агент не найден: {agent_uid}', message_thread_id=message_thread_id)
-                        return
-                    db.add(Task(task_uid=uuid.uuid4().hex, task_type=task_type, command=None, status=TaskStatus.pending, agent_id=agent.id))
-                    db.commit()
-                    await self.send_message(bot_token, chat_id, f'Задача {task_type} поставлена для агента {agent_uid}.', message_thread_id=message_thread_id)
-                    return
-                agents = db.query(Agent).all()
+                agents = db.query(Agent).order_by(Agent.hostname.asc()).limit(20).all()
                 if not agents:
                     await self.send_message(bot_token, chat_id, 'Нет зарегистрированных агентов.', message_thread_id=message_thread_id)
                     return
-                for agent in agents:
-                    db.add(Task(task_uid=uuid.uuid4().hex, task_type=task_type, command=None, status=TaskStatus.pending, agent_id=agent.id))
-                db.commit()
-                await self.send_message(bot_token, chat_id, f'Задача {task_type} поставлена для {len(agents)} агентов.', message_thread_id=message_thread_id)
+                keyboard = [
+                    [{'text': f'{a.hostname} ({a.agent_uid[:8]})', 'callback_data': f'pick_agent:{a.id}'}]
+                    for a in agents
+                ]
+                await self.send_message(
+                    bot_token,
+                    chat_id,
+                    'Выберите агента:',
+                    message_thread_id=message_thread_id,
+                    reply_markup={'inline_keyboard': keyboard},
+                )
                 return
+        finally:
+            db.close()
+
+    async def _handle_callback_query(self, bot_token: str, callback_query: dict) -> None:
+        callback_query_id = str(callback_query.get('id') or '')
+        data = str(callback_query.get('data') or '')
+        message = callback_query.get('message') or {}
+        chat = message.get('chat') or {}
+        chat_id = str(chat.get('id', ''))
+        message_id = message.get('message_id')
+        if not callback_query_id or not data or not chat_id or not isinstance(message_id, int):
+            return
+        await self.answer_callback(bot_token, callback_query_id)
+
+        db = SessionLocal()
+        try:
+            if data.startswith('pick_agent:'):
+                agent_id = int(data.split(':', 1)[1])
+                agent = db.query(Agent).filter(Agent.id == agent_id).first()
+                if not agent:
+                    return
+                keyboard = [
+                    [{'text': task_type, 'callback_data': f'run_task:{agent.id}:{task_type}'}]
+                    for task_type in sorted(settings.allowed_task_type_set)
+                ]
+                await self.edit_message(
+                    bot_token,
+                    chat_id,
+                    message_id,
+                    f'Агент: {agent.hostname} ({agent.agent_uid}). Выберите задачу:',
+                    reply_markup={'inline_keyboard': keyboard[:20]},
+                )
+                return
+            if data.startswith('run_task:'):
+                _, agent_id_raw, task_type = data.split(':', 2)
+                agent_id = int(agent_id_raw)
+                agent = db.query(Agent).filter(Agent.id == agent_id).first()
+                if not agent or task_type not in settings.allowed_task_type_set:
+                    return
+                db.add(Task(task_uid=uuid.uuid4().hex, task_type=task_type, command=None, status=TaskStatus.pending, agent_id=agent.id))
+                db.commit()
+                await self.edit_message(bot_token, chat_id, message_id, f'✅ Запущена задача {task_type} для {agent.hostname} ({agent.agent_uid}).')
         finally:
             db.close()
 
@@ -173,6 +242,9 @@ class TelegramService:
                     member_update = upd.get('my_chat_member')
                     if member_update:
                         await self._handle_member_update(bot_token, member_update)
+                    callback_query = upd.get('callback_query')
+                    if callback_query:
+                        await self._handle_callback_query(bot_token, callback_query)
                     continue
                 await self._handle_command(bot_token, message)
 
