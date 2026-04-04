@@ -24,6 +24,7 @@ docker compose logs -f kyss-agent
 - отдельный volume `/agent-data` только для ключей и config;
 - `no-new-privileges`, `cap_drop: [ALL]`, `pids_limit`, лимиты CPU/RAM;
 - TLS verification включена по умолчанию (`VERIFY_TLS=true`).
+- `run_command` выполняется только из allowlist и только через trusted binaries (`/bin`, `/usr/bin`, `/usr/sbin`, `/sbin`) без shell.
 
 ## Предустановленные инструменты в образе
 В изолированный Docker-образ агента добавлены утилиты диагностики:

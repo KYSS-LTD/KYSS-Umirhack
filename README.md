@@ -115,7 +115,7 @@ python agent/agent.py --base-url https://your-domain-or-host --registration-toke
 - `check_disk`
 - `check_ports`
 - `check_system_info`
-- `run_command` (только из whitelist `ALLOWED_COMMANDS`)
+- `run_command` (только из whitelist `ALLOWED_COMMANDS`, без shell и только trusted binaries)
 
 ## Надёжность
 - heartbeat каждые 5–10 сек;

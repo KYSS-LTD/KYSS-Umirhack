@@ -8,6 +8,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import shutil
 import time
 import uuid
 from pathlib import Path
@@ -24,6 +25,7 @@ DEFAULT_INTERVAL = 5
 MIN_INTERVAL = 5
 MAX_INTERVAL = 10
 MAX_BACKOFF_SECONDS = 60
+SAFE_EXEC_DIRS = {'/bin', '/usr/bin', '/usr/sbin', '/sbin'}
 
 logger = logging.getLogger('kyss-agent')
 
@@ -80,19 +82,46 @@ def get_local_ips() -> list[str]:
     return sorted(list(ips))
 
 
-def run_task(task: dict, allowed_commands: set[str], timeout_sec: int = 20) -> tuple[str, str, str]:
+
+
+def get_safe_executable(binary_name: str) -> str:
+    executable = shutil.which(binary_name)
+    if not executable:
+        raise FileNotFoundError(f'binary not found: {binary_name}')
+    if os.path.dirname(executable) not in SAFE_EXEC_DIRS:
+        raise PermissionError(f'unsafe binary path: {executable}')
+    return executable
+
+def build_allowed_command_map(raw_allowed: str) -> dict[str, list[str]]:
+    allowed_map: dict[str, list[str]] = {}
+    for cmd in [item.strip() for item in raw_allowed.split(',') if item.strip()]:
+        parts = shlex.split(cmd)
+        if not parts:
+            continue
+        executable = shutil.which(parts[0])
+        if not executable:
+            logger.warning('Allowed command skipped (binary not found): %s', cmd)
+            continue
+        if os.path.dirname(executable) not in SAFE_EXEC_DIRS:
+            logger.warning('Allowed command skipped (unsafe binary path): %s -> %s', cmd, executable)
+            continue
+        allowed_map[cmd] = [executable, *parts[1:]]
+    return allowed_map
+
+
+def run_task(task: dict, allowed_commands: dict[str, list[str]], timeout_sec: int = 20) -> tuple[str, str, str]:
     task_type = task.get('task_type')
     task_uid = task.get('task_uid', 'unknown')
     logger.info('Processing task task_uid=%s task_type=%s', task_uid, task_type)
     try:
         if task_type == 'check_cpu':
-            out = subprocess.check_output(['uptime'], text=True, timeout=5)
+            out = subprocess.check_output([get_safe_executable('uptime')], text=True, timeout=5)
             return 'done', out[:4000], out[:4000]
         if task_type == 'check_ram':
-            out = subprocess.check_output(['free', '-m'], text=True, timeout=5)
+            out = subprocess.check_output([get_safe_executable('free'), '-m'], text=True, timeout=5)
             return 'done', out[:4000], out[:4000]
         if task_type == 'check_disk':
-            out = subprocess.check_output(['df', '-h'], text=True, timeout=5)
+            out = subprocess.check_output([get_safe_executable('df'), '-h'], text=True, timeout=5)
             return 'done', out[:4000], out[:4000]
         if task_type == 'check_ports':
             ports = [22, 80, 443]
@@ -117,10 +146,10 @@ def run_task(task: dict, allowed_commands: set[str], timeout_sec: int = 20) -> t
             return 'done', text[:4000], text[:4000]
         if task_type == 'run_command':
             cmd = task.get('command', '')
-            if cmd not in allowed_commands:
+            args = allowed_commands.get(cmd)
+            if not args:
                 logger.warning('Rejected command by allowlist: %s', cmd)
                 return 'failed', 'команда отклонена whitelist', 'команда отклонена whitelist'
-            args = shlex.split(cmd)
             result = subprocess.run(args, capture_output=True, text=True, timeout=timeout_sec, check=False)
             output = (result.stdout + '\n' + result.stderr)[:4000]
             return ('done' if result.returncode == 0 else 'failed', output, output)
@@ -194,7 +223,7 @@ def ensure_status(response: httpx.Response, scope: str) -> None:
 
 
 def loop(base_url: str, agent_uid: str, agent_token: str, private_key: str, public_key: str, interval: int, verify_tls: bool):
-    allowed = {c.strip() for c in os.getenv('ALLOWED_COMMANDS', 'uptime,df -h,free -m').split(',') if c.strip()}
+    allowed = build_allowed_command_map(os.getenv('ALLOWED_COMMANDS', 'uptime,df -h,free -m'))
     headers = {'Authorization': f'Bearer {agent_token}'}
     sleep_time = max(MIN_INTERVAL, min(interval, MAX_INTERVAL))
     logger.info('Agent loop started with interval=%s', sleep_time)
