@@ -1,15 +1,92 @@
 {% extends "base.html" %}
 {% block title %}Панель — KYSSCHECK{% endblock %}
 {% block content %}
-<div class="d-flex align-items-center justify-content-between mb-3">
+<div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
   <div>
     <h1 class="h3 mb-1">Панель диагностики</h1>
-    <p class="text-secondary mb-0">Агенты, задачи и оповещения в реальном времени.</p>
+    <p class="text-secondary mb-0">Мониторинг агентов, задач и инцидентов с фильтрацией и аналитикой.</p>
   </div>
   <a class="btn btn-primary" href="/tasks/new">Создать задачу</a>
 </div>
 
+<div class="row g-3 mb-1">
+  <div class="col-6 col-lg-3">
+    <div class="card p-3 stat-card">
+      <div class="text-secondary small">Online агенты</div>
+      <div class="h3 mb-0 text-success">{{ metrics.online_count }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card p-3 stat-card">
+      <div class="text-secondary small">Offline / Revoked</div>
+      <div class="h3 mb-0 text-danger">{{ metrics.offline_count }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card p-3 stat-card">
+      <div class="text-secondary small">Failed задач (выборка)</div>
+      <div class="h3 mb-0 text-warning">{{ metrics.failed_tasks_count }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card p-3 stat-card">
+      <div class="text-secondary small">Offline событий (24ч)</div>
+      <div class="h3 mb-0">{{ metrics.offline_events_24h }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="card p-3 mb-3">
+  <form method="get" action="/" class="row g-2 align-items-end">
+    <div class="col-12 col-md-4">
+      <label class="form-label mb-1">Фильтр по агенту</label>
+      <select class="form-select" name="agent_uid">
+        <option value="" {% if not filters.agent_uid %}selected{% endif %}>все агенты</option>
+        {% for a in all_agents %}
+          <option value="{{ a.agent_uid }}" {% if filters.agent_uid == a.agent_uid %}selected{% endif %}>{{ a.hostname }} ({{ a.agent_uid }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-md-3">
+      <label class="form-label mb-1">Статус агента</label>
+      <select class="form-select" name="status">
+        <option value="all" {% if filters.status == 'all' %}selected{% endif %}>все</option>
+        <option value="online" {% if filters.status == 'online' %}selected{% endif %}>online</option>
+        <option value="offline" {% if filters.status == 'offline' %}selected{% endif %}>offline/revoked</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-3">
+      <label class="form-label mb-1">Тип задачи</label>
+      <select class="form-select" name="task_type">
+        <option value="all" {% if filters.task_type == 'all' %}selected{% endif %}>все</option>
+        <option value="check_cpu" {% if filters.task_type == 'check_cpu' %}selected{% endif %}>check_cpu</option>
+        <option value="check_ram" {% if filters.task_type == 'check_ram' %}selected{% endif %}>check_ram</option>
+        <option value="check_disk" {% if filters.task_type == 'check_disk' %}selected{% endif %}>check_disk</option>
+        <option value="check_ports" {% if filters.task_type == 'check_ports' %}selected{% endif %}>check_ports</option>
+        <option value="check_system_info" {% if filters.task_type == 'check_system_info' %}selected{% endif %}>check_system_info</option>
+        <option value="run_command" {% if filters.task_type == 'run_command' %}selected{% endif %}>run_command</option>
+      </select>
+    </div>
+    <div class="col-12 col-md-2 d-grid">
+      <button class="btn btn-outline-primary" type="submit">Применить</button>
+    </div>
+  </form>
+</div>
+
 <div class="row g-3">
+  <div class="col-12 col-xl-6">
+    <div class="card p-3">
+      <h2 class="h5 mb-3">Статусы задач (график)</h2>
+      <canvas id="taskStatusChart" height="180"></canvas>
+    </div>
+  </div>
+  <div class="col-12 col-xl-6">
+    <div class="card p-3">
+      <h2 class="h5 mb-3">Типы задач (график)</h2>
+      <canvas id="taskTypesChart" height="180"></canvas>
+    </div>
+  </div>
+
   <div class="col-12 col-lg-8">
     <div class="card p-3">
       <h2 class="h5 mb-3">Агенты</h2>
@@ -41,16 +118,26 @@
 
   <div class="col-12 col-lg-4">
     <div class="card p-3 h-100">
-      <h2 class="h5 mb-3">Оповещения</h2>
-      {% if alerts %}
-        <ul class="list-group list-group-flush">
-          {% for a in alerts %}
-            <li class="list-group-item px-0 text-danger">Проблема с агентом {{ a.agent_uid }}</li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="text-success mb-0">Критичных оповещений нет</p>
-      {% endif %}
+      <h2 class="h5 mb-3">История отвалов/восстановлений</h2>
+      <div class="timeline-list">
+        {% for e in events %}
+          <div class="timeline-item small">
+            <div>
+              {% if e.event_type == 'offline' %}
+                <span class="badge text-bg-danger">offline</span>
+              {% elif e.event_type == 'online' %}
+                <span class="badge text-bg-success">online</span>
+              {% else %}
+                <span class="badge text-bg-secondary">{{ e.event_type }}</span>
+              {% endif %}
+              <span class="ms-1">{{ e.agent.agent_uid if e.agent else '-' }}</span>
+            </div>
+            <div class="text-secondary">{{ e.created_at }}</div>
+          </div>
+        {% else %}
+          <p class="text-secondary mb-0">Событий пока нет.</p>
+        {% endfor %}
+      </div>
     </div>
   </div>
 
@@ -65,7 +152,7 @@
             <tr>
               <td class="mono">{{ t.task_uid }}</td>
               <td>{{ t.task_type }}</td>
-              <td>{{ t.agent.agent_uid if t.agent else 'любой' }}</td>
+              <td>{{ t.agent.agent_uid if t.agent else 'не назначен' }}</td>
               <td>{{ t.status.value }}</td>
               <td class="text-secondary">{{ (t.logs or t.result or '-')[:120] }}</td>
             </tr>
@@ -78,4 +165,37 @@
     </div>
   </div>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  const data = {{ chart_data_json | safe }};
+
+  const statusCtx = document.getElementById('taskStatusChart');
+  if (statusCtx) {
+    new Chart(statusCtx, {
+      type: 'doughnut',
+      data: {
+        labels: data.taskStatus.labels,
+        datasets: [{ data: data.taskStatus.values }]
+      },
+      options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+    });
+  }
+
+  const typeCtx = document.getElementById('taskTypesChart');
+  if (typeCtx) {
+    new Chart(typeCtx, {
+      type: 'bar',
+      data: {
+        labels: data.taskTypes.labels,
+        datasets: [{ data: data.taskTypes.values }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  }
+</script>
 {% endblock %}

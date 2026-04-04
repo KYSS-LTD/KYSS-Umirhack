@@ -37,6 +37,18 @@ class Agent(Base):
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class AgentEvent(Base):
+    __tablename__ = 'agent_events'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_id: Mapped[int] = mapped_column(ForeignKey('agents.id'), index=True)
+    event_type: Mapped[str] = mapped_column(String(32), index=True)  # online/offline/revoked
+    details: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    agent: Mapped[Agent] = relationship('Agent')
+
+
 class Task(Base):
     __tablename__ = 'tasks'
     __table_args__ = (UniqueConstraint('task_uid', name='uq_task_uid'),)

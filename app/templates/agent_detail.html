@@ -18,14 +18,33 @@
   {% endif %}
 </div>
 
-<div class="card p-3">
-  <h2 class="h5 mb-3">Последние задачи агента</h2>
-  <ul class="list-group list-group-flush">
-    {% for t in tasks %}
-      <li class="list-group-item px-0"><span class="mono">{{ t.task_uid }}</span> — {{ t.status.value }} — {{ (t.logs or t.result or '-')[:100] }}</li>
-    {% else %}
-      <li class="list-group-item px-0 text-secondary">Задач для агента пока нет.</li>
-    {% endfor %}
-  </ul>
+<div class="row g-3">
+  <div class="col-12 col-lg-7">
+    <div class="card p-3">
+      <h2 class="h5 mb-3">Последние задачи агента</h2>
+      <ul class="list-group list-group-flush">
+        {% for t in tasks %}
+          <li class="list-group-item px-0"><span class="mono">{{ t.task_uid }}</span> — {{ t.status.value }} — {{ (t.logs or t.result or '-')[:100] }}</li>
+        {% else %}
+          <li class="list-group-item px-0 text-secondary">Задач для агента пока нет.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="col-12 col-lg-5">
+    <div class="card p-3">
+      <h2 class="h5 mb-3">События доступности</h2>
+      <ul class="list-group list-group-flush">
+        {% for e in events %}
+          <li class="list-group-item px-0 d-flex justify-content-between">
+            <span>{% if e.event_type == 'offline' %}🔴{% else %}🟢{% endif %} {{ e.event_type }}</span>
+            <span class="text-secondary small">{{ e.created_at }}</span>
+          </li>
+        {% else %}
+          <li class="list-group-item px-0 text-secondary">Событий пока нет.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
 </div>
 {% endblock %}
