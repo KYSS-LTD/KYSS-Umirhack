@@ -25,6 +25,15 @@ docker compose logs -f kyss-agent
 - `no-new-privileges`, `cap_drop: [ALL]`, `pids_limit`, лимиты CPU/RAM;
 - TLS verification включена по умолчанию (`VERIFY_TLS=true`).
 
+## Отказоустойчивость
+- если DNS/сеть недоступны при старте, агент **не падает**, а уходит в retry с backoff;
+- при потере сети агент продолжает попытки и сам восстанавливается после возврата сети;
+- при `401 Unauthorized` агент автоматически перерегистрируется с тем же `agent_uid` и обновляет токен.
+
+## Troubleshooting
+- `No address associated with hostname`: неверный `BASE_URL` или DNS недоступен для Docker.
+- `[SSL] record layer failure`: чаще всего перепутан протокол. Для `http://...` не нужен TLS, для `https://...` нужен корректный сертификат.
+
 ## Обновление
 ```bash
 docker compose pull && docker compose up -d

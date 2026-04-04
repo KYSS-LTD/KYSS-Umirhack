@@ -118,5 +118,7 @@ python agent/agent.py --base-url https://your-domain-or-host --registration-toke
 ## Надёжность
 - heartbeat каждые 5–10 сек;
 - агент помечается offline при отсутствии heartbeat;
+- при потере сети агент автоматически продолжает retry и восстанавливается после возвращения сети;
+- при `401 Unauthorized` агент сам перерегистрируется и обновляет `agent_token`;
 - базовый retry задачи при fail (`max_retries=1` по умолчанию);
 - timeout выполнения задач на агенте.

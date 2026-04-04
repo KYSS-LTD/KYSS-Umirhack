@@ -31,6 +31,9 @@ def create_or_update_agent(
         agent.hostname = hostname
         if public_key:
             agent.public_key = public_key
+        if agent_token:
+            agent.agent_token = agent_token
+        agent.revoked = False
         if ip_addresses is not None:
             agent.ip_addresses = ip_addresses
         if os_version is not None:

@@ -23,8 +23,13 @@ CONFIG_PATH = CONFIG_DIR / 'config.json'
 DEFAULT_INTERVAL = 5
 MAX_INTERVAL = 10
 MIN_INTERVAL = 5
+MAX_BACKOFF_SECONDS = 60
 
 logger = logging.getLogger('kyss-agent')
+
+
+class ReRegisterRequired(Exception):
+    pass
 
 
 def configure_logging(level: str) -> None:
@@ -34,6 +39,9 @@ def configure_logging(level: str) -> None:
         stream=sys.stdout,
         format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
     )
+    if numeric_level > logging.DEBUG:
+        logging.getLogger('httpx').setLevel(logging.WARNING)
+        logging.getLogger('httpcore').setLevel(logging.WARNING)
 
 
 def ensure_keys() -> tuple[str, str]:
@@ -124,33 +132,66 @@ def run_task(task: dict, allowed_commands: set[str], timeout_sec: int = 20) -> t
         return 'failed', msg[:4000], msg[:4000]
 
 
+def build_envelope(agent_uid: str, private_key: str, payload: dict) -> dict:
+    now = int(time.time())
+    return {
+        'agent_uid': agent_uid,
+        'timestamp': now,
+        'nonce': str(uuid.uuid4()),
+        'payload': payload,
+        'signature': sign_payload(private_key, payload, now),
+    }
+
+
 def register(base_url: str, token: str, verify_tls: bool, agent_uid: str | None = None):
     private_key, public_key = ensure_keys()
-    agent_uid = agent_uid or str(uuid.uuid4())
     payload = {
-        'agent_uid': agent_uid,
+        'agent_uid': agent_uid or str(uuid.uuid4()),
         'hostname': platform.node() or 'unknown',
         'public_key': public_key,
         'registration_token': token,
     }
-    logger.info('Registering agent on %s', base_url)
     with httpx.Client(timeout=10, verify=verify_tls) as client:
         r = client.post(f'{base_url}/api/agents/register', json=payload)
         r.raise_for_status()
         data = r.json()
-    cfg = {'base_url': base_url, 'agent_uid': data['agent_id'], 'public_key': public_key, 'agent_token': data['agent_token']}
+    cfg = {
+        'base_url': base_url,
+        'agent_uid': data['agent_id'],
+        'public_key': public_key,
+        'agent_token': data['agent_token'],
+    }
     CONFIG_PATH.write_text(json.dumps(cfg))
     logger.info('Agent registration complete. agent_uid=%s', data['agent_id'])
     return private_key, cfg
 
 
+def register_with_retry(base_url: str, token: str, verify_tls: bool, preferred_agent_uid: str | None = None):
+    backoff = MIN_INTERVAL
+    while True:
+        try:
+            logger.info('Registering agent on %s', base_url)
+            return register(base_url, token, verify_tls, agent_uid=preferred_agent_uid)
+        except Exception as exc:
+            logger.warning('Registration failed: %s. Retry in %ss', exc, backoff)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
+
+
 def load_or_register(base_url: str, token: str, verify_tls: bool):
+    private_key, _ = ensure_keys()
     if CONFIG_PATH.exists():
         cfg = json.loads(CONFIG_PATH.read_text())
-        private_key, _ = ensure_keys()
         logger.info('Loaded existing agent config from %s for agent_uid=%s', CONFIG_PATH, cfg.get('agent_uid'))
         return private_key, cfg
-    return register(base_url, token, verify_tls)
+    private_key, cfg = register_with_retry(base_url, token, verify_tls)
+    return private_key, cfg
+
+
+def ensure_status(response: httpx.Response, scope: str) -> None:
+    if response.status_code == 401:
+        raise ReRegisterRequired(f'{scope}: unauthorized (401)')
+    response.raise_for_status()
 
 
 def loop(base_url: str, agent_uid: str, agent_token: str, private_key: str, public_key: str, interval: int, verify_tls: bool):
@@ -158,8 +199,8 @@ def loop(base_url: str, agent_uid: str, agent_token: str, private_key: str, publ
     headers = {'Authorization': f'Bearer {agent_token}'}
     sleep_time = max(MIN_INTERVAL, min(interval, MAX_INTERVAL))
     logger.info('Agent loop started. heartbeat_interval=%ss allowed_commands=%s', sleep_time, sorted(allowed))
+
     while True:
-        now = int(time.time())
         hb_payload = {
             'hostname': platform.node(),
             'public_key': public_key,
@@ -167,33 +208,24 @@ def loop(base_url: str, agent_uid: str, agent_token: str, private_key: str, publ
             'os_version': platform.platform(),
             'network_interfaces': get_local_ips(),
         }
-        envelope = {
-            'agent_uid': agent_uid,
-            'timestamp': now,
-            'nonce': str(uuid.uuid4()),
-            'payload': hb_payload,
-            'signature': sign_payload(private_key, hb_payload, now),
-        }
         try:
             with httpx.Client(timeout=10, verify=verify_tls, headers=headers) as client:
-                client.post(f'{base_url}/api/agents/heartbeat', json=envelope).raise_for_status()
-                logger.debug('Heartbeat sent for agent_uid=%s', agent_uid)
-                task_resp = client.post(f'{base_url}/api/agents/tasks/next', json=envelope)
-                task_resp.raise_for_status()
-                task = task_resp.json().get('task')
+                hb_response = client.post(f'{base_url}/api/agents/heartbeat', json=build_envelope(agent_uid, private_key, hb_payload))
+                ensure_status(hb_response, 'heartbeat')
+                task_response = client.post(f'{base_url}/api/agents/tasks/next', json=build_envelope(agent_uid, private_key, hb_payload))
+                ensure_status(task_response, 'tasks/next')
+                task = task_response.json().get('task')
                 if task:
                     status, result, logs = run_task(task, allowed_commands=allowed)
                     task_payload = {'task_uid': task['task_uid'], 'status': status, 'result': result, 'logs': logs}
-                    now2 = int(time.time())
-                    result_env = {
-                        'agent_uid': agent_uid,
-                        'timestamp': now2,
-                        'nonce': str(uuid.uuid4()),
-                        'payload': task_payload,
-                        'signature': sign_payload(private_key, task_payload, now2),
-                    }
-                    client.post(f'{base_url}/api/tasks/result', json=result_env).raise_for_status()
+                    result_response = client.post(
+                        f'{base_url}/api/tasks/result',
+                        json=build_envelope(agent_uid, private_key, task_payload),
+                    )
+                    ensure_status(result_response, 'tasks/result')
                     logger.info('Task completed task_uid=%s status=%s', task['task_uid'], status)
+        except ReRegisterRequired as exc:
+            raise ReRegisterRequired(str(exc)) from exc
         except Exception as exc:
             logger.warning('Agent loop iteration failed: %s', exc)
         time.sleep(sleep_time)
@@ -201,6 +233,19 @@ def loop(base_url: str, agent_uid: str, agent_token: str, private_key: str, publ
 
 def str_to_bool(value: str) -> bool:
     return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def run_forever(base_url: str, registration_token: str, interval: int, verify_tls: bool):
+    private_key, cfg = load_or_register(base_url, registration_token, verify_tls)
+
+    while True:
+        try:
+            public = PUBLIC_KEY_PATH.read_text().strip()
+            loop(base_url, cfg['agent_uid'], cfg['agent_token'], private_key, public, interval, verify_tls)
+        except ReRegisterRequired as exc:
+            old_uid = cfg.get('agent_uid')
+            logger.warning('Need re-register agent (%s). Trying to refresh credentials for agent_uid=%s', exc, old_uid)
+            private_key, cfg = register_with_retry(base_url, registration_token, verify_tls, preferred_agent_uid=old_uid)
 
 
 def main():
@@ -219,10 +264,12 @@ def main():
     verify_tls = str_to_bool(args.verify_tls)
     if not verify_tls:
         logger.warning('TLS certificate verification is disabled (VERIFY_TLS=false). Use only for local debugging.')
+    if args.base_url.startswith('https://') and not verify_tls:
+        logger.info('HTTPS is used with VERIFY_TLS=false. For local dev only.')
+    if args.base_url.startswith('http://') and verify_tls:
+        logger.info('Base URL uses HTTP. TLS verification setting has no effect for plain HTTP.')
 
-    private, cfg = load_or_register(args.base_url, args.registration_token, verify_tls)
-    public = PUBLIC_KEY_PATH.read_text().strip()
-    loop(args.base_url, cfg['agent_uid'], cfg['agent_token'], private, public, args.interval, verify_tls)
+    run_forever(args.base_url, args.registration_token, args.interval, verify_tls)
 
 
 if __name__ == '__main__':
