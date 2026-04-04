@@ -77,6 +77,8 @@ docker compose up -d --build
 docker compose logs -f kyss-agent
 ```
 
+В составе `deploy/agent-package` Docker-образ теперь включает диагностические утилиты (`uptime/free`, `iproute2`, `ping`, `dnsutils`, `curl`), чтобы задачи агента не падали из-за отсутствия системных инструментов.
+
 ## Регистрация и запуск агента
 ### Вариант 1 (скрипт установки)
 ```bash
