@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -5,6 +7,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import get_settings
 from app.core.database import Base, engine
 from app.routers import agents, auth, tasks, ui
+from app.services.telegram_service import telegram_service
 
 settings = get_settings()
 app = FastAPI(title='KYSSCHECK', docs_url=None, redoc_url=None, openapi_url=None)
@@ -50,3 +53,8 @@ app.include_router(ui.router)
 
 
 Base.metadata.create_all(bind=engine)
+
+
+@app.on_event('startup')
+async def start_background_services():
+    asyncio.create_task(telegram_service.polling_loop())

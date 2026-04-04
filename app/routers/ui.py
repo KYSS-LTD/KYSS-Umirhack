@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
 from app.models.models import Agent, AgentEvent, AgentProfile, Task, TaskScenario, TaskStatus, User
+from app.services.telegram_service import telegram_service
 from app.repositories.repositories import (
     create_task,
     create_user,
@@ -439,3 +440,35 @@ def create_task_form(
             create_task(db, task_uid=uuid.uuid4().hex, task_type=task_type, command=cmd, agent_id=agent.id)
 
     return RedirectResponse(url='/', status_code=303)
+
+
+@router.get('/settings/telegram', response_class=HTMLResponse)
+def telegram_settings_page(request: Request, db: Session = Depends(get_db)):
+    current_user, access = _require_permissions(request, db, need_admin=True)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
+    cfg = telegram_service.get_or_create_config(db)
+    return templates.TemplateResponse('telegram_settings.html', {'request': request, 'cfg': cfg, 'current_user': current_user, 'user_access': access})
+
+
+@router.post('/settings/telegram')
+def telegram_settings_save(
+    request: Request,
+    bot_token: str = Form(''),
+    chat_id: str = Form(''),
+    events_enabled: str = Form('off'),
+    db: Session = Depends(get_db),
+):
+    current_user, access = _require_permissions(request, db, need_admin=True)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
+    cfg = telegram_service.get_or_create_config(db)
+    cfg.bot_token = bot_token.strip()[:255] or None
+    cfg.chat_id = chat_id.strip()[:64] or None
+    cfg.events_enabled = events_enabled == 'on'
+    db.commit()
+    return RedirectResponse(url='/settings/telegram', status_code=303)
