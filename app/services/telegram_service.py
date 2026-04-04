@@ -15,6 +15,7 @@ settings = get_settings()
 class TelegramService:
     def __init__(self):
         self._offset = 0
+        self._prepared_token: str | None = None
 
     @staticmethod
     def get_or_create_config(db: Session) -> TelegramIntegrationSettings:
@@ -61,11 +62,12 @@ class TelegramService:
         chat_id = str(chat.get('id', ''))
         if not text or not chat_id:
             return
+        command = text.split()[0].split('@')[0].lower()
 
         db = SessionLocal()
         try:
             cfg = self.get_or_create_config(db)
-            if text.startswith('/start'):
+            if command == '/start':
                 intro = (
                     'KYSSCHECK bot активен.\n'
                     f'ID этого чата: {chat_id}\n'
@@ -78,24 +80,24 @@ class TelegramService:
                 await self.send_message(bot_token, chat_id, intro)
                 return
 
-            if text.startswith('/chatid'):
+            if command == '/chatid':
                 await self.send_message(bot_token, chat_id, f'ID этого чата: {chat_id}')
                 return
 
-            if text.startswith('/events_on'):
+            if command == '/events_on':
                 cfg.chat_id = chat_id
                 cfg.events_enabled = True
                 db.commit()
                 await self.send_message(bot_token, chat_id, 'Дублирование событий включено для этого чата.')
                 return
 
-            if text.startswith('/events_off'):
+            if command == '/events_off':
                 cfg.events_enabled = False
                 db.commit()
                 await self.send_message(bot_token, chat_id, 'Дублирование событий выключено.')
                 return
 
-            if text.startswith('/run'):
+            if command == '/run':
                 parts = text.split()
                 if len(parts) < 2:
                     await self.send_message(bot_token, chat_id, 'Использование: /run <task_type> [agent_uid]')
@@ -126,11 +128,36 @@ class TelegramService:
         finally:
             db.close()
 
+    async def _handle_member_update(self, bot_token: str, payload: dict) -> None:
+        chat = payload.get('chat') or {}
+        chat_id = str(chat.get('id', ''))
+        if not chat_id:
+            return
+        old_status = ((payload.get('old_chat_member') or {}).get('status') or '').lower()
+        new_status = ((payload.get('new_chat_member') or {}).get('status') or '').lower()
+        if old_status in {'left', 'kicked'} and new_status in {'member', 'administrator'}:
+            await self.send_message(
+                bot_token,
+                chat_id,
+                f'Спасибо за добавление! ID этой группы: {chat_id}\n'
+                'Вставьте его в настройки KYSSCHECK (/settings/telegram).',
+            )
+
+    async def _ensure_polling_ready(self, bot_token: str) -> None:
+        if self._prepared_token == bot_token:
+            return
+        url = f'https://api.telegram.org/bot{bot_token}/deleteWebhook'
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(url, json={'drop_pending_updates': False})
+        self._offset = 0
+        self._prepared_token = bot_token
+
     async def _poll_once(self, bot_token: str) -> None:
+        await self._ensure_polling_ready(bot_token)
         url = f'https://api.telegram.org/bot{bot_token}/getUpdates'
         async with httpx.AsyncClient(timeout=25.0) as client:
             response = await client.get(url, params={'timeout': 20, 'offset': self._offset})
-            data = response.json()
+            data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
             if not data.get('ok'):
                 return
             for upd in data.get('result', []):
@@ -139,6 +166,9 @@ class TelegramService:
                     self._offset = max(self._offset, upd_id + 1)
                 message = upd.get('message') or upd.get('channel_post')
                 if not message:
+                    member_update = upd.get('my_chat_member')
+                    if member_update:
+                        await self._handle_member_update(bot_token, member_update)
                     continue
                 await self._handle_command(bot_token, message)
 
