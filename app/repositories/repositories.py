@@ -170,3 +170,39 @@ def get_next_task_for_agent(db: Session, agent: Agent) -> Task | None:
 
 def get_task_by_uid(db: Session, task_uid: str) -> Task | None:
     return db.query(Task).filter(Task.task_uid == task_uid).first()
+
+
+def fail_stale_running_tasks(db: Session, timeout_seconds: int = 30) -> int:
+    if timeout_seconds <= 0:
+        return 0
+    threshold = datetime.utcnow() - timedelta(seconds=timeout_seconds)
+    tasks = (
+        db.query(Task)
+        .filter(Task.status == TaskStatus.running, Task.started_at.is_not(None), Task.started_at < threshold)
+        .all()
+    )
+    for task in tasks:
+        task.status = TaskStatus.failed
+        task.result = f'task timeout: exceeded {timeout_seconds}s'
+        task.logs = task.result
+        task.finished_at = datetime.utcnow()
+    if tasks:
+        db.commit()
+    return len(tasks)
+
+
+def fail_running_tasks_for_offline_agents(db: Session) -> int:
+    tasks = (
+        db.query(Task)
+        .join(Agent, Task.agent_id == Agent.id)
+        .filter(Task.status == TaskStatus.running, Agent.is_online.is_(False))
+        .all()
+    )
+    for task in tasks:
+        task.status = TaskStatus.failed
+        task.result = 'agent offline during execution'
+        task.logs = task.result
+        task.finished_at = datetime.utcnow()
+    if tasks:
+        db.commit()
+    return len(tasks)

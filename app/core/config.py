@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     cors_origins: str = 'http://localhost:8000'
     enforce_https: bool = True
     agent_offline_seconds: int = 25
+    task_execution_timeout_seconds: int = 30
 
     @property
     def allowed_command_set(self) -> set[str]:

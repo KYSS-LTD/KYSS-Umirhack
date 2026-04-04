@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.models import Agent, TaskStatus
-from app.repositories.repositories import create_task, ensure_user_access, get_agent_by_uid, get_task_by_uid
+from app.repositories.repositories import (
+    create_task,
+    ensure_user_access,
+    fail_running_tasks_for_offline_agents,
+    fail_stale_running_tasks,
+    get_agent_by_uid,
+    get_task_by_uid,
+    mark_offline_agents,
+)
 from app.schemas.agent import SignedEnvelope
 from app.schemas.task import TaskCreateRequest
 from app.services.auth_services import get_current_user
@@ -27,6 +35,9 @@ def create_task_endpoint(payload: TaskCreateRequest, request: Request, db: Sessi
         raise HTTPException(status_code=400, detail='Недопустимый тип задачи')
     if payload.task_type == 'run_command' and payload.command not in settings.allowed_command_set:
         raise HTTPException(status_code=400, detail='Команда не входит в белый список')
+    mark_offline_agents(db, offline_seconds=settings.agent_offline_seconds)
+    fail_running_tasks_for_offline_agents(db)
+    fail_stale_running_tasks(db, timeout_seconds=settings.task_execution_timeout_seconds)
     target_agent_id = None
     if payload.agent_uid:
         agent = get_agent_by_uid(db, payload.agent_uid)
@@ -52,6 +63,10 @@ def submit_result(
     task = get_task_by_uid(db, task_uid)
     if not task:
         raise HTTPException(status_code=404, detail='Задача не найдена')
+    if task.agent_id and task.agent_id != agent.id:
+        raise HTTPException(status_code=403, detail='Задача назначена другому агенту')
+    if task.status != TaskStatus.running:
+        return {'status': 'ignored', 'task_status': task.status.value, 'reason': 'task already finalized'}
 
     new_status = envelope.payload.get('status', 'failed')
     task.logs = str(envelope.payload.get('logs', envelope.payload.get('result', '')))[:8000]
