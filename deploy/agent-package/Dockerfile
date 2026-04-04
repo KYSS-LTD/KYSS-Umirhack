@@ -24,7 +24,7 @@ RUN groupadd -g 10001 appgroup \
 
 RUN pip install --no-cache-dir httpx==0.27.2 pynacl==1.5.0
 
-COPY agent.py /app/agent.py
+COPY agent.py diagnostics.py /app/
 
 USER appuser
 
