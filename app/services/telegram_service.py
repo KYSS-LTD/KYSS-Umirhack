@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal, engine
-from app.models.models import Agent, Task, TaskStatus, TelegramIntegrationSettings
+from app.models.models import Agent, AgentProfile, Task, TaskStatus, TelegramIntegrationSettings
 
 settings = get_settings()
 
@@ -96,11 +96,20 @@ class TelegramService:
         await self.send_message(bot_token, chat_id, '✅ Настройки Telegram обновлены. Бот перезапущен и готов к работе.')
 
     @staticmethod
-    def _fmt_event(event_type: str, agent_uid: str, details: str | None) -> str:
+    def _fmt_event(event_type: str, agent_label: str, details: str | None) -> str:
         ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
         details_text = f' ({details})' if details else ''
         icon = '🟢' if event_type == 'online' else '🔴' if event_type == 'offline' else 'ℹ️'
-        return f'{icon} [{ts}] Агент {agent_uid}: {event_type}{details_text}'
+        return f'{icon} [{ts}] Агент {agent_label}: {event_type}{details_text}'
+
+    @staticmethod
+    def _resolve_agent_label(db: Session, agent_uid: str) -> str:
+        agent = db.query(Agent).filter(Agent.agent_uid == agent_uid).first()
+        if not agent:
+            return agent_uid
+        profile = db.query(AgentProfile).filter(AgentProfile.agent_id == agent.id).first()
+        base = profile.custom_name if profile and profile.custom_name else agent.hostname
+        return f'{base} ({agent.agent_uid})'
 
     async def notify_agent_event(self, agent_uid: str, event_type: str, details: str | None = None) -> None:
         db = SessionLocal()
@@ -111,7 +120,7 @@ class TelegramService:
             await self.send_message(
                 cfg.bot_token,
                 cfg.chat_id,
-                self._fmt_event(event_type, agent_uid, details),
+                self._fmt_event(event_type, self._resolve_agent_label(db, agent_uid), details),
                 message_thread_id=cfg.events_thread_id,
             )
         finally:
@@ -134,7 +143,7 @@ class TelegramService:
             details_text = f'\nРезультат: {details[:500]}' if details else ''
             text = (
                 f'{icon} Проверка завершена\n'
-                f'Агент: {agent_uid}\n'
+                f'Агент: {self._resolve_agent_label(db, agent_uid)}\n'
                 f'Task: {task_uid}\n'
                 f'Тип: {task_type}\n'
                 f'Статус: {status}'
