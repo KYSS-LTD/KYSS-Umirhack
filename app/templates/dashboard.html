@@ -92,12 +92,13 @@
       <h2 class="h5 mb-3">Агенты</h2>
       <div class="table-responsive">
         <table class="table align-middle mb-0">
-          <thead><tr><th>ID</th><th>Хост</th><th>Статус</th><th>Последний heartbeat</th></tr></thead>
+          <thead><tr><th>ID</th><th>Имя/хост</th><th>IP сервера</th><th>Статус</th><th>Последний heartbeat</th></tr></thead>
           <tbody>
           {% for a in agents %}
             <tr>
               <td class="mono"><a href="/agents/{{ a.agent_uid }}">{{ a.agent_uid }}</a></td>
-              <td>{{ a.hostname }}</td>
+              <td><strong>{{ a.display_name }}</strong><div class="small text-secondary">{{ a.hostname }}</div></td>
+              <td class="small">{{ a.ip_addresses or "-" }}</td>
               <td>
                 {% if a.revoked or not a.is_online %}
                   <span class="status-dot dot-bad"></span><span class="text-danger">Offline / Revoked</span>
@@ -108,7 +109,7 @@
               <td>{{ a.last_seen_at or '-' }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="4" class="text-secondary">Нет зарегистрированных агентов.</td></tr>
+            <tr><td colspan="5" class="text-secondary">Нет зарегистрированных агентов.</td></tr>
           {% endfor %}
           </tbody>
         </table>

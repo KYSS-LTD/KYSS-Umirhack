@@ -17,7 +17,7 @@
       <label class="form-label">Назначить агенту</label>
       <select class="form-select" name="agent_uid">
         <option value="">все агенты</option>
-        {% for a in agents %}<option value="{{ a.agent_uid }}">{{ a.hostname }} ({{ a.agent_uid }})</option>{% endfor %}
+        {% for a in agents %}<option value="{{ a.agent_uid }}">{{ a.display_name }} ({{ a.agent_uid }})</option>{% endfor %}
       </select>
     </div>
 

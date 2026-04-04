@@ -11,12 +11,22 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
-from app.models.models import Agent, AgentEvent, Task, User
+from app.models.models import Agent, AgentEvent, AgentProfile, Task, User
 from app.repositories.repositories import create_task, create_user, get_user_by_username, list_recent_agent_events, mark_offline_agents
 
 router = APIRouter(tags=['ui'])
 templates = Jinja2Templates(directory='app/templates')
 settings = get_settings()
+
+
+def _decorate_agent(agent: Agent, custom_name: str | None) -> Agent:
+    agent.display_name = custom_name or agent.hostname  # type: ignore[attr-defined]
+    return agent
+
+
+def _load_profiles(db: Session) -> dict[int, str]:
+    profiles = db.query(AgentProfile).all()
+    return {p.agent_id: p.custom_name for p in profiles if p.custom_name}
 
 
 def _get_ui_user_or_redirect(request: Request, db: Session) -> User | RedirectResponse:
@@ -128,7 +138,8 @@ def dashboard(
     elif status == 'offline':
         agents_query = agents_query.filter((Agent.is_online.is_(False)) | (Agent.revoked.is_(True)))
 
-    agents = agents_query.order_by(Agent.last_seen_at.desc()).all()
+    profiles_by_agent_id = _load_profiles(db)
+    agents = [_decorate_agent(a, profiles_by_agent_id.get(a.id)) for a in agents_query.order_by(Agent.last_seen_at.desc()).all()]
 
     tasks_query = db.query(Task)
     if agent_uid:
@@ -141,7 +152,7 @@ def dashboard(
         tasks_query = tasks_query.filter(Task.task_type == task_type)
     tasks = tasks_query.order_by(Task.created_at.desc()).limit(100).all()
 
-    all_agents = db.query(Agent).order_by(Agent.hostname.asc()).all()
+    all_agents = [_decorate_agent(a, profiles_by_agent_id.get(a.id)) for a in db.query(Agent).order_by(Agent.hostname.asc()).all()]
     task_type_counter = Counter(t.task_type for t in tasks)
     task_status_counter = Counter(t.status.value for t in tasks)
 
@@ -155,14 +166,8 @@ def dashboard(
 
     filters = {'agent_uid': agent_uid, 'status': status, 'task_type': task_type}
     chart_data = {
-        'taskStatus': {
-            'labels': list(task_status_counter.keys()) or ['no-data'],
-            'values': list(task_status_counter.values()) or [0],
-        },
-        'taskTypes': {
-            'labels': list(task_type_counter.keys()) or ['no-data'],
-            'values': list(task_type_counter.values()) or [0],
-        },
+        'taskStatus': {'labels': list(task_status_counter.keys()) or ['no-data'], 'values': list(task_status_counter.values()) or [0]},
+        'taskTypes': {'labels': list(task_type_counter.keys()) or ['no-data'], 'values': list(task_type_counter.values()) or [0]},
     }
 
     return templates.TemplateResponse(
@@ -194,20 +199,37 @@ def agent_detail(agent_uid: str, request: Request, db: Session = Depends(get_db)
         return current_user
 
     agent = db.query(Agent).filter(Agent.agent_uid == agent_uid).first()
+    profile = db.query(AgentProfile).filter(AgentProfile.agent_id == agent.id).first() if agent else None
+    if agent:
+        _decorate_agent(agent, profile.custom_name if profile else None)
+
     tasks = db.query(Task).filter(Task.agent_id == agent.id).order_by(Task.created_at.desc()).limit(50).all() if agent else []
-    events = (
-        db.query(AgentEvent)
-        .filter(AgentEvent.agent_id == agent.id)
-        .order_by(AgentEvent.created_at.desc())
-        .limit(30)
-        .all()
-        if agent
-        else []
-    )
+    events = db.query(AgentEvent).filter(AgentEvent.agent_id == agent.id).order_by(AgentEvent.created_at.desc()).limit(30).all() if agent else []
     return templates.TemplateResponse(
         'agent_detail.html',
         {'request': request, 'agent': agent, 'tasks': tasks, 'events': events, 'current_user': current_user},
     )
+
+
+@router.post('/agents/{agent_uid}/rename')
+def rename_agent(agent_uid: str, request: Request, custom_name: str = Form(''), db: Session = Depends(get_db)):
+    current_user = _get_ui_user_or_redirect(request, db)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
+
+    agent = db.query(Agent).filter(Agent.agent_uid == agent_uid).first()
+    if not agent:
+        return RedirectResponse(url='/', status_code=303)
+
+    profile = db.query(AgentProfile).filter(AgentProfile.agent_id == agent.id).first()
+    if not profile:
+        profile = AgentProfile(agent_id=agent.id)
+        db.add(profile)
+
+    name = custom_name.strip()[:120]
+    profile.custom_name = name or None
+    db.commit()
+    return RedirectResponse(url=f'/agents/{agent_uid}', status_code=303)
 
 
 @router.get('/tasks/new', response_class=HTMLResponse)
@@ -216,7 +238,8 @@ def new_task_page(request: Request, db: Session = Depends(get_db)):
     if isinstance(current_user, RedirectResponse):
         return current_user
 
-    agents = db.query(Agent).order_by(Agent.hostname.asc()).all()
+    profiles_by_agent_id = _load_profiles(db)
+    agents = [_decorate_agent(a, profiles_by_agent_id.get(a.id)) for a in db.query(Agent).order_by(Agent.hostname.asc()).all()]
     return templates.TemplateResponse(
         'task_new.html',
         {'request': request, 'agents': agents, 'allowed_types': sorted(settings.allowed_task_type_set), 'current_user': current_user},
@@ -243,8 +266,7 @@ def create_task_form(
         if target_agent:
             create_task(db, task_uid=uuid.uuid4().hex, task_type=task_type, command=command or None, agent_id=target_agent.id)
     else:
-        agents = db.query(Agent).all()
-        for agent in agents:
+        for agent in db.query(Agent).all():
             create_task(db, task_uid=uuid.uuid4().hex, task_type=task_type, command=command or None, agent_id=agent.id)
 
     return RedirectResponse(url='/', status_code=303)
