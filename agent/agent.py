@@ -17,7 +17,7 @@ import httpx
 import nacl.encoding
 import nacl.signing
 
-from agent.diagnostics import execute_task, format_result, parse_task_params, truncate_text
+from diagnostics import execute_task, format_result, parse_task_params, truncate_text
 
 CONFIG_DIR = Path.home() / '.agent'
 PRIVATE_KEY_PATH = CONFIG_DIR / 'private.key'
