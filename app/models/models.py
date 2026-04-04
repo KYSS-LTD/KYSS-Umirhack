@@ -73,6 +73,17 @@ class AgentEvent(Base):
     agent: Mapped[Agent] = relationship('Agent')
 
 
+class TaskScenario(Base):
+    __tablename__ = 'task_scenarios'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    task_type: Mapped[str] = mapped_column(String(64))
+    command: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Task(Base):
     __tablename__ = 'tasks'
     __table_args__ = (UniqueConstraint('task_uid', name='uq_task_uid'),)

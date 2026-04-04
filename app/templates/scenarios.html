@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Сценарии задач — KYSSCHECK{% endblock %}
+{% block content %}
+<a class="btn btn-link ps-0" href="/tasks/new">← К созданию задач</a>
+<div class="card p-3 mb-3">
+  <h1 class="h4 mb-3">Кастомные сценарии задач</h1>
+  <form method="post" action="/scenarios" class="row g-2">
+    <div class="col-12 col-md-4"><input class="form-control" name="name" placeholder="Название сценария" required></div>
+    <div class="col-12 col-md-3">
+      <select class="form-select" name="task_type">
+        {% for t in allowed_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-3"><input class="form-control" name="command" placeholder="Команда (если run_command)"></div>
+    <div class="col-12 col-md-2"><button class="btn btn-primary w-100" type="submit">Добавить</button></div>
+    <div class="col-12"><input class="form-control" name="description" placeholder="Описание"></div>
+  </form>
+</div>
+
+<div class="card p-3">
+  <h2 class="h5 mb-3">Существующие сценарии</h2>
+  <ul class="list-group list-group-flush">
+    {% for s in scenarios %}
+      <li class="list-group-item px-0"><strong>{{ s.name }}</strong> — {{ s.task_type }}{% if s.command %} ({{ s.command }}){% endif %} <span class="text-secondary">{{ s.description or '' }}</span></li>
+    {% else %}
+      <li class="list-group-item px-0 text-secondary">Сценариев пока нет.</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}

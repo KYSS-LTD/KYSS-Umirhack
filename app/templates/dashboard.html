@@ -79,6 +79,12 @@
   </form>
 </div>
 
+
+<div class="card p-3 mb-3">
+  <h2 class="h5 mb-2">Топология: backend ↔ агенты</h2>
+  <svg id="topologySvg" viewBox="0 0 500 360" style="width:100%; max-height:360px; background:#f8fafc; border-radius:12px;"></svg>
+</div>
+
 <div class="row g-3">
   <div class="col-12 col-xl-6">
     <div class="card p-3">
@@ -157,7 +163,7 @@
           <tbody>
           {% for t in tasks %}
             <tr>
-              <td class="mono">{{ t.task_uid }}</td>
+              <td class="mono"><a href="/tasks/{{ t.task_uid }}">{{ t.task_uid }}</a></td>
               <td>{{ t.task_type }}</td>
               <td>{{ t.agent.agent_uid if t.agent else 'не назначен' }}</td>
               <td>{{ t.status.value }}</td>
@@ -176,6 +182,37 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
   const data = {{ chart_data_json | safe }};
+
+  const topo = {{ topology_json | safe }};
+  const svg = document.getElementById('topologySvg');
+  if (svg) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const cx = 250, cy = 180;
+    const backend = document.createElementNS(ns, 'g');
+    backend.innerHTML = '<circle cx="250" cy="180" r="32" fill="#2563eb"/><text x="250" y="185" text-anchor="middle" fill="#fff" font-size="11">BACKEND</text>';
+    svg.appendChild(backend);
+    topo.forEach((node) => {
+      const line = document.createElementNS(ns, 'line');
+      line.setAttribute('x1', cx); line.setAttribute('y1', cy);
+      line.setAttribute('x2', node.x); line.setAttribute('y2', node.y);
+      line.setAttribute('stroke', '#94a3b8'); line.setAttribute('stroke-width', '1.5');
+      svg.appendChild(line);
+
+      const circle = document.createElementNS(ns, 'circle');
+      circle.setAttribute('cx', node.x); circle.setAttribute('cy', node.y);
+      circle.setAttribute('r', '16');
+      circle.setAttribute('fill', node.online ? '#16a34a' : '#dc2626');
+      svg.appendChild(circle);
+
+      const label = document.createElementNS(ns, 'text');
+      label.setAttribute('x', node.x);
+      label.setAttribute('y', node.y + 30);
+      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('font-size', '10');
+      label.textContent = node.name;
+      svg.appendChild(label);
+    });
+  }
 
   const statusCtx = document.getElementById('taskStatusChart');
   if (statusCtx) {

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Детали задачи — KYSSCHECK{% endblock %}
+{% block content %}
+<a class="btn btn-link ps-0" href="/">← Назад к панели</a>
+<div class="card p-3">
+  {% if task %}
+    <h1 class="h4 mb-3">Задача {{ task.task_uid }}</h1>
+    <div class="row g-2 mb-3">
+      <div class="col-md-4"><strong>Тип:</strong> {{ task.task_type }}</div>
+      <div class="col-md-4"><strong>Статус:</strong> {{ task.status.value }}</div>
+      <div class="col-md-4"><strong>Агент:</strong> {{ task.agent.agent_uid if task.agent else '-' }}</div>
+    </div>
+    <h2 class="h6">Полный результат</h2>
+    <pre class="bg-light p-3 rounded" style="white-space: pre-wrap;">{{ task.result or '-' }}</pre>
+    <h2 class="h6">Полные логи</h2>
+    <pre class="bg-light p-3 rounded" style="white-space: pre-wrap;">{{ task.logs or '-' }}</pre>
+  {% else %}
+    <p class="text-danger mb-0">Задача не найдена.</p>
+  {% endif %}
+</div>
+{% endblock %}
