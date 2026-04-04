@@ -78,8 +78,14 @@
 
 
 <div class="card p-3 mb-3">
-  <h2 class="h5 mb-2">Топология: backend ↔ агенты</h2>
-  <svg id="topologySvg" viewBox="0 0 500 360" style="width:100%; max-height:360px; background:#f8fafc; border-radius:12px;"></svg>
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+    <h2 class="h5 mb-0">Топология: backend ↔ агенты</h2>
+    <div class="small text-secondary">
+      <span class="badge text-bg-success">online</span>
+      <span class="badge text-bg-danger">offline</span>
+    </div>
+  </div>
+  <svg id="topologySvg" viewBox="0 0 500 360" style="width:100%; max-height:360px; background:linear-gradient(135deg,#f8fbff 0%,#eef5ff 45%,#f7faff 100%); border:1px solid #dbeafe; border-radius:14px;"></svg>
 </div>
 
 <div class="row g-3">
@@ -186,38 +192,70 @@
   function drawTopology(nodes) {
     if (!svg) return;
     svg.innerHTML = '';
+    const defs = document.createElementNS(ns, 'defs');
+    defs.innerHTML = `
+      <filter id="softGlow">
+        <feGaussianBlur stdDeviation="2.4" result="blur" />
+        <feMerge>
+          <feMergeNode in="blur" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    `;
+    svg.appendChild(defs);
+
     const backend = document.createElementNS(ns, 'g');
-    backend.innerHTML = '<circle cx="250" cy="180" r="34" fill="#1d4ed8"/><text x="250" y="185" text-anchor="middle" fill="#fff" font-size="11">BACKEND</text>';
+    backend.innerHTML = `
+      <circle cx="250" cy="180" r="42" fill="#dbeafe" />
+      <circle cx="250" cy="180" r="34" fill="#1d4ed8" filter="url(#softGlow)" />
+      <circle cx="250" cy="180" r="26" fill="#2563eb" />
+      <text x="250" y="184" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">BACKEND</text>
+    `;
     svg.appendChild(backend);
 
     nodes.forEach((node, idx) => {
-      const line = document.createElementNS(ns, 'line');
-      line.setAttribute('x1', '250'); line.setAttribute('y1', '180');
-      line.setAttribute('x2', node.x); line.setAttribute('y2', node.y);
-      line.setAttribute('stroke', node.online ? '#22c55e' : '#ef4444');
-      line.setAttribute('stroke-width', '2');
-      line.setAttribute('opacity', '0.75');
-      svg.appendChild(line);
+      const pathId = `link-${idx}`;
+      const path = document.createElementNS(ns, 'path');
+      const curveX = (250 + Number(node.x)) / 2 + (idx % 2 === 0 ? 12 : -12);
+      const curveY = (180 + Number(node.y)) / 2 + (idx % 2 === 0 ? -8 : 8);
+      path.setAttribute('id', pathId);
+      path.setAttribute('d', `M250 180 Q ${curveX} ${curveY}, ${node.x} ${node.y}`);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', node.online ? '#22c55e' : '#ef4444');
+      path.setAttribute('stroke-width', node.online ? '2.4' : '2');
+      path.setAttribute('opacity', '0.82');
+      path.setAttribute('stroke-dasharray', node.online ? '5 5' : '2 8');
+      svg.appendChild(path);
+
+      if (node.online) {
+        const packet = document.createElementNS(ns, 'circle');
+        packet.setAttribute('r', '3.2');
+        packet.setAttribute('fill', '#16a34a');
+        packet.innerHTML = `<animateMotion dur="1.8s" repeatCount="indefinite"><mpath href="#${pathId}" /></animateMotion>`;
+        svg.appendChild(packet);
+      }
 
       const pulse = document.createElementNS(ns, 'circle');
       pulse.setAttribute('cx', node.x); pulse.setAttribute('cy', node.y);
-      pulse.setAttribute('r', node.online ? '20' : '0');
-      pulse.setAttribute('fill', node.online ? 'rgba(34,197,94,0.25)' : 'transparent');
-      pulse.innerHTML = '<animate attributeName="r" values="16;22;16" dur="1.8s" repeatCount="indefinite" />';
+      pulse.setAttribute('r', node.online ? '22' : '16');
+      pulse.setAttribute('fill', node.online ? 'rgba(34,197,94,0.20)' : 'rgba(239,68,68,0.12)');
+      pulse.innerHTML = `<animate attributeName="r" values="${node.online ? '17;24;17' : '14;18;14'}" dur="1.8s" repeatCount="indefinite" />`;
       svg.appendChild(pulse);
 
       const circle = document.createElementNS(ns, 'circle');
       circle.setAttribute('cx', node.x); circle.setAttribute('cy', node.y);
-      circle.setAttribute('r', '15');
+      circle.setAttribute('r', '16');
       circle.setAttribute('fill', node.online ? '#16a34a' : '#dc2626');
+      circle.setAttribute('filter', 'url(#softGlow)');
       svg.appendChild(circle);
 
       const label = document.createElementNS(ns, 'text');
       label.setAttribute('x', node.x);
-      label.setAttribute('y', node.y + 30);
+      label.setAttribute('y', node.y + 33);
       label.setAttribute('text-anchor', 'middle');
-      label.setAttribute('font-size', '10');
-      label.textContent = node.name;
+      label.setAttribute('font-size', '10.5');
+      label.setAttribute('font-weight', '600');
+      label.textContent = `${node.name} ${node.online ? '●' : '○'}`;
       svg.appendChild(label);
     });
   }
