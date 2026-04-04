@@ -22,6 +22,19 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class UserAccess(Base):
+    __tablename__ = 'user_access'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), unique=True, index=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_view_agents: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_create_tasks: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user: Mapped[User] = relationship('User')
+
+
 class Agent(Base):
     __tablename__ = 'agents'
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

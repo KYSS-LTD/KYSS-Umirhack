@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.models.models import Agent, AgentEvent, Task, TaskStatus, User
+from app.models.models import Agent, AgentEvent, AgentProfile, Task, TaskStatus, User, UserAccess
 
 
 EVENT_ONLINE = 'online'
@@ -13,11 +13,44 @@ def get_user_by_username(db: Session, username: str) -> User | None:
     return db.query(User).filter(User.username == username).first()
 
 
+def get_user_access(db: Session, user_id: int) -> UserAccess | None:
+    return db.query(UserAccess).filter(UserAccess.user_id == user_id).first()
+
+
+def ensure_user_access(db: Session, user: User) -> UserAccess:
+    access = get_user_access(db, user.id)
+    if access:
+        return access
+    access = UserAccess(user_id=user.id, is_admin=False, can_view_agents=False, can_create_tasks=False)
+    db.add(access)
+    db.commit()
+    db.refresh(access)
+    return access
+
+
+def list_users_with_access(db: Session) -> list[tuple[User, UserAccess]]:
+    users = db.query(User).order_by(User.id.asc()).all()
+    rows: list[tuple[User, UserAccess]] = []
+    for user in users:
+        rows.append((user, ensure_user_access(db, user)))
+    return rows
+
+
 def create_user(db: Session, username: str, password_hash: str) -> User:
+    is_first_user = db.query(User).count() == 0
     user = User(username=username, password_hash=password_hash, is_active=True)
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    access = UserAccess(
+        user_id=user.id,
+        is_admin=is_first_user,
+        can_view_agents=is_first_user,
+        can_create_tasks=is_first_user,
+    )
+    db.add(access)
+    db.commit()
     return user
 
 

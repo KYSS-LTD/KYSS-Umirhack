@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Панель — KYSSCHECK{% endblock %}
 {% block content %}
+{% if permission_denied %}
+<div class="card p-4">
+  <h1 class="h4 mb-2">Доступ ограничен</h1>
+  <p class="text-secondary mb-0">У вас пока нет прав на просмотр серверов и задач. Обратитесь к администратору.</p>
+</div>
+{% else %}
 <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
   <div>
     <h1 class="h3 mb-1">Панель диагностики</h1>
@@ -200,4 +206,5 @@
     });
   }
 </script>
+{% endif %}
 {% endblock %}

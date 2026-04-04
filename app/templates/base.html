@@ -26,7 +26,12 @@
     <div class="d-flex align-items-center gap-2">
       {% if current_user %}
         <span class="text-secondary small">{{ current_user.username }}</span>
-        <a class="btn btn-outline-primary btn-sm" href="/tasks/new">Новая задача</a>
+        {% if user_access and (user_access.is_admin or user_access.can_create_tasks) %}
+          <a class="btn btn-outline-primary btn-sm" href="/tasks/new">Новая задача</a>
+        {% endif %}
+        {% if user_access and user_access.is_admin %}
+          <a class="btn btn-outline-secondary btn-sm" href="/admin/users">Права</a>
+        {% endif %}
         <form method="post" action="/logout" class="m-0">
           <button class="btn btn-outline-danger btn-sm" type="submit">Выйти</button>
         </form>

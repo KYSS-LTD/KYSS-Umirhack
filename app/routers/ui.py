@@ -12,7 +12,15 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
 from app.models.models import Agent, AgentEvent, AgentProfile, Task, User
-from app.repositories.repositories import create_task, create_user, get_user_by_username, list_recent_agent_events, mark_offline_agents
+from app.repositories.repositories import (
+    create_task,
+    create_user,
+    ensure_user_access,
+    get_user_by_username,
+    list_recent_agent_events,
+    list_users_with_access,
+    mark_offline_agents,
+)
 
 router = APIRouter(tags=['ui'])
 templates = Jinja2Templates(directory='app/templates')
@@ -46,6 +54,22 @@ def _get_ui_user_or_redirect(request: Request, db: Session) -> User | RedirectRe
         response.delete_cookie('access_token')
         return response
     return user
+
+
+def _require_permissions(request: Request, db: Session, need_view: bool = False, need_create: bool = False, need_admin: bool = False):
+    current_user = _get_ui_user_or_redirect(request, db)
+    if isinstance(current_user, RedirectResponse):
+        return current_user, None
+
+    access = ensure_user_access(db, current_user)
+    allowed = True
+    if need_admin and not access.is_admin:
+        allowed = False
+    if need_view and not (access.is_admin or access.can_view_agents):
+        allowed = False
+    if need_create and not (access.is_admin or access.can_create_tasks):
+        allowed = False
+    return current_user, access if allowed else None
 
 
 @router.get('/login', response_class=HTMLResponse)
@@ -124,9 +148,11 @@ def dashboard(
     task_type: str = Query(default='all'),
     db: Session = Depends(get_db),
 ):
-    current_user = _get_ui_user_or_redirect(request, db)
+    current_user, access = _require_permissions(request, db, need_view=True)
     if isinstance(current_user, RedirectResponse):
         return current_user
+    if not access:
+        return templates.TemplateResponse('dashboard.html', {'request': request, 'permission_denied': True, 'current_user': current_user, 'user_access': ensure_user_access(db, current_user)})
 
     mark_offline_agents(db, settings.agent_offline_seconds)
 
@@ -144,10 +170,7 @@ def dashboard(
     tasks_query = db.query(Task)
     if agent_uid:
         target_agent = db.query(Agent).filter(Agent.agent_uid == agent_uid).first()
-        if target_agent:
-            tasks_query = tasks_query.filter(Task.agent_id == target_agent.id)
-        else:
-            tasks_query = tasks_query.filter(Task.id == -1)
+        tasks_query = tasks_query.filter(Task.agent_id == target_agent.id) if target_agent else tasks_query.filter(Task.id == -1)
     if task_type != 'all':
         tasks_query = tasks_query.filter(Task.task_type == task_type)
     tasks = tasks_query.order_by(Task.created_at.desc()).limit(100).all()
@@ -156,19 +179,9 @@ def dashboard(
     task_type_counter = Counter(t.task_type for t in tasks)
     task_status_counter = Counter(t.status.value for t in tasks)
 
-    online_count = sum(1 for a in all_agents if a.is_online and not a.revoked)
-    offline_count = len(all_agents) - online_count
-    failed_tasks_count = task_status_counter.get('failed', 0)
-
     cutoff = datetime.utcnow() - timedelta(hours=24)
     recent_events = list_recent_agent_events(db, limit=120)
     offline_events_24h = sum(1 for e in recent_events if e.event_type == 'offline' and e.created_at >= cutoff)
-
-    filters = {'agent_uid': agent_uid, 'status': status, 'task_type': task_type}
-    chart_data = {
-        'taskStatus': {'labels': list(task_status_counter.keys()) or ['no-data'], 'values': list(task_status_counter.values()) or [0]},
-        'taskTypes': {'labels': list(task_type_counter.keys()) or ['no-data'], 'values': list(task_type_counter.values()) or [0]},
-    }
 
     return templates.TemplateResponse(
         'dashboard.html',
@@ -179,24 +192,33 @@ def dashboard(
             'tasks': tasks,
             'alerts': [a for a in all_agents if a.revoked or not a.is_online],
             'events': recent_events,
-            'filters': filters,
+            'filters': {'agent_uid': agent_uid, 'status': status, 'task_type': task_type},
             'metrics': {
-                'online_count': online_count,
-                'offline_count': offline_count,
-                'failed_tasks_count': failed_tasks_count,
+                'online_count': sum(1 for a in all_agents if a.is_online and not a.revoked),
+                'offline_count': sum(1 for a in all_agents if not a.is_online or a.revoked),
+                'failed_tasks_count': task_status_counter.get('failed', 0),
                 'offline_events_24h': offline_events_24h,
             },
-            'chart_data_json': json.dumps(chart_data, ensure_ascii=False),
+            'chart_data_json': json.dumps(
+                {
+                    'taskStatus': {'labels': list(task_status_counter.keys()) or ['no-data'], 'values': list(task_status_counter.values()) or [0]},
+                    'taskTypes': {'labels': list(task_type_counter.keys()) or ['no-data'], 'values': list(task_type_counter.values()) or [0]},
+                },
+                ensure_ascii=False,
+            ),
             'current_user': current_user,
+            'user_access': access,
         },
     )
 
 
 @router.get('/agents/{agent_uid}', response_class=HTMLResponse)
 def agent_detail(agent_uid: str, request: Request, db: Session = Depends(get_db)):
-    current_user = _get_ui_user_or_redirect(request, db)
+    current_user, access = _require_permissions(request, db, need_view=True)
     if isinstance(current_user, RedirectResponse):
         return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
 
     agent = db.query(Agent).filter(Agent.agent_uid == agent_uid).first()
     profile = db.query(AgentProfile).filter(AgentProfile.agent_id == agent.id).first() if agent else None
@@ -205,58 +227,87 @@ def agent_detail(agent_uid: str, request: Request, db: Session = Depends(get_db)
 
     tasks = db.query(Task).filter(Task.agent_id == agent.id).order_by(Task.created_at.desc()).limit(50).all() if agent else []
     events = db.query(AgentEvent).filter(AgentEvent.agent_id == agent.id).order_by(AgentEvent.created_at.desc()).limit(30).all() if agent else []
-    return templates.TemplateResponse(
-        'agent_detail.html',
-        {'request': request, 'agent': agent, 'tasks': tasks, 'events': events, 'current_user': current_user},
-    )
+    return templates.TemplateResponse('agent_detail.html', {'request': request, 'agent': agent, 'tasks': tasks, 'events': events, 'current_user': current_user, 'user_access': access})
 
 
 @router.post('/agents/{agent_uid}/rename')
 def rename_agent(agent_uid: str, request: Request, custom_name: str = Form(''), db: Session = Depends(get_db)):
-    current_user = _get_ui_user_or_redirect(request, db)
+    current_user, access = _require_permissions(request, db, need_view=True)
     if isinstance(current_user, RedirectResponse):
         return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
 
     agent = db.query(Agent).filter(Agent.agent_uid == agent_uid).first()
     if not agent:
         return RedirectResponse(url='/', status_code=303)
 
-    profile = db.query(AgentProfile).filter(AgentProfile.agent_id == agent.id).first()
-    if not profile:
-        profile = AgentProfile(agent_id=agent.id)
-        db.add(profile)
-
-    name = custom_name.strip()[:120]
-    profile.custom_name = name or None
+    profile = db.query(AgentProfile).filter(AgentProfile.agent_id == agent.id).first() or AgentProfile(agent_id=agent.id)
+    db.add(profile)
+    profile.custom_name = custom_name.strip()[:120] or None
     db.commit()
     return RedirectResponse(url=f'/agents/{agent_uid}', status_code=303)
 
 
-@router.get('/tasks/new', response_class=HTMLResponse)
-def new_task_page(request: Request, db: Session = Depends(get_db)):
-    current_user = _get_ui_user_or_redirect(request, db)
+@router.get('/admin/users', response_class=HTMLResponse)
+def admin_users(request: Request, db: Session = Depends(get_db)):
+    current_user, access = _require_permissions(request, db, need_admin=True)
     if isinstance(current_user, RedirectResponse):
         return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
+
+    rows = list_users_with_access(db)
+    return templates.TemplateResponse('admin_users.html', {'request': request, 'rows': rows, 'current_user': current_user, 'user_access': access})
+
+
+@router.post('/admin/users/{user_id}/access')
+def update_user_access(
+    user_id: int,
+    request: Request,
+    can_view_agents: str = Form('off'),
+    can_create_tasks: str = Form('off'),
+    is_admin: str = Form('off'),
+    db: Session = Depends(get_db),
+):
+    current_user, access = _require_permissions(request, db, need_admin=True)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return RedirectResponse(url='/admin/users', status_code=303)
+
+    ua = ensure_user_access(db, user)
+    ua.is_admin = is_admin == 'on'
+    ua.can_view_agents = can_view_agents == 'on' or ua.is_admin
+    ua.can_create_tasks = can_create_tasks == 'on' or ua.is_admin
+    db.commit()
+    return RedirectResponse(url='/admin/users', status_code=303)
+
+
+@router.get('/tasks/new', response_class=HTMLResponse)
+def new_task_page(request: Request, db: Session = Depends(get_db)):
+    current_user, access = _require_permissions(request, db, need_create=True)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
 
     profiles_by_agent_id = _load_profiles(db)
     agents = [_decorate_agent(a, profiles_by_agent_id.get(a.id)) for a in db.query(Agent).order_by(Agent.hostname.asc()).all()]
-    return templates.TemplateResponse(
-        'task_new.html',
-        {'request': request, 'agents': agents, 'allowed_types': sorted(settings.allowed_task_type_set), 'current_user': current_user},
-    )
+    return templates.TemplateResponse('task_new.html', {'request': request, 'agents': agents, 'allowed_types': sorted(settings.allowed_task_type_set), 'current_user': current_user, 'user_access': access})
 
 
 @router.post('/tasks/new')
-def create_task_form(
-    request: Request,
-    task_type: str = Form(...),
-    command: str = Form(''),
-    agent_uid: str = Form(''),
-    db: Session = Depends(get_db),
-):
-    current_user = _get_ui_user_or_redirect(request, db)
+def create_task_form(request: Request, task_type: str = Form(...), command: str = Form(''), agent_uid: str = Form(''), db: Session = Depends(get_db)):
+    current_user, access = _require_permissions(request, db, need_create=True)
     if isinstance(current_user, RedirectResponse):
         return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
 
     if task_type not in settings.allowed_task_type_set:
         return RedirectResponse(url='/tasks/new', status_code=303)
