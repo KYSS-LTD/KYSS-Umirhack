@@ -29,13 +29,16 @@ class TelegramService:
         return cfg
 
     @staticmethod
-    async def send_message(bot_token: str, chat_id: str, text: str) -> None:
+    async def send_message(bot_token: str, chat_id: str, text: str, message_thread_id: int | None = None) -> None:
         if not bot_token or not chat_id:
             return
         url = f'https://api.telegram.org/bot{bot_token}/sendMessage'
+        payload = {'chat_id': chat_id, 'text': text}
+        if isinstance(message_thread_id, int):
+            payload['message_thread_id'] = message_thread_id
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
-                await client.post(url, json={'chat_id': chat_id, 'text': text})
+                await client.post(url, json=payload)
         except Exception:
             return
 
@@ -60,6 +63,7 @@ class TelegramService:
         text = (message.get('text') or '').strip()
         chat = message.get('chat') or {}
         chat_id = str(chat.get('id', ''))
+        message_thread_id = message.get('message_thread_id')
         if not text or not chat_id:
             return
         command = text.split()[0].split('@')[0].lower()
@@ -77,53 +81,53 @@ class TelegramService:
                     '/events_off - выключить дублирование событий\n'
                     '/run <task_type> [agent_uid] - запустить проверку'
                 )
-                await self.send_message(bot_token, chat_id, intro)
+                await self.send_message(bot_token, chat_id, intro, message_thread_id=message_thread_id)
                 return
 
             if command == '/chatid':
-                await self.send_message(bot_token, chat_id, f'ID этого чата: {chat_id}')
+                await self.send_message(bot_token, chat_id, f'ID этого чата: {chat_id}', message_thread_id=message_thread_id)
                 return
 
             if command == '/events_on':
                 cfg.chat_id = chat_id
                 cfg.events_enabled = True
                 db.commit()
-                await self.send_message(bot_token, chat_id, 'Дублирование событий включено для этого чата.')
+                await self.send_message(bot_token, chat_id, 'Дублирование событий включено для этого чата.', message_thread_id=message_thread_id)
                 return
 
             if command == '/events_off':
                 cfg.events_enabled = False
                 db.commit()
-                await self.send_message(bot_token, chat_id, 'Дублирование событий выключено.')
+                await self.send_message(bot_token, chat_id, 'Дублирование событий выключено.', message_thread_id=message_thread_id)
                 return
 
             if command == '/run':
                 parts = text.split()
                 if len(parts) < 2:
-                    await self.send_message(bot_token, chat_id, 'Использование: /run <task_type> [agent_uid]')
+                    await self.send_message(bot_token, chat_id, 'Использование: /run <task_type> [agent_uid]', message_thread_id=message_thread_id)
                     return
                 task_type = parts[1].strip()
                 if task_type not in settings.allowed_task_type_set:
-                    await self.send_message(bot_token, chat_id, f'Недопустимый task_type: {task_type}')
+                    await self.send_message(bot_token, chat_id, f'Недопустимый task_type: {task_type}', message_thread_id=message_thread_id)
                     return
                 agent_uid = parts[2].strip() if len(parts) > 2 else ''
                 if agent_uid:
                     agent = db.query(Agent).filter(Agent.agent_uid == agent_uid).first()
                     if not agent:
-                        await self.send_message(bot_token, chat_id, f'Агент не найден: {agent_uid}')
+                        await self.send_message(bot_token, chat_id, f'Агент не найден: {agent_uid}', message_thread_id=message_thread_id)
                         return
                     db.add(Task(task_uid=uuid.uuid4().hex, task_type=task_type, command=None, status=TaskStatus.pending, agent_id=agent.id))
                     db.commit()
-                    await self.send_message(bot_token, chat_id, f'Задача {task_type} поставлена для агента {agent_uid}.')
+                    await self.send_message(bot_token, chat_id, f'Задача {task_type} поставлена для агента {agent_uid}.', message_thread_id=message_thread_id)
                     return
                 agents = db.query(Agent).all()
                 if not agents:
-                    await self.send_message(bot_token, chat_id, 'Нет зарегистрированных агентов.')
+                    await self.send_message(bot_token, chat_id, 'Нет зарегистрированных агентов.', message_thread_id=message_thread_id)
                     return
                 for agent in agents:
                     db.add(Task(task_uid=uuid.uuid4().hex, task_type=task_type, command=None, status=TaskStatus.pending, agent_id=agent.id))
                 db.commit()
-                await self.send_message(bot_token, chat_id, f'Задача {task_type} поставлена для {len(agents)} агентов.')
+                await self.send_message(bot_token, chat_id, f'Задача {task_type} поставлена для {len(agents)} агентов.', message_thread_id=message_thread_id)
                 return
         finally:
             db.close()
