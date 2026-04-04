@@ -111,6 +111,16 @@ python agent/agent.py --base-url https://your-domain-or-host --registration-toke
 - `POST /api/tasks/result` — отправка результата задачи агентом.
 - `POST /api/tasks` — создание задачи пользователем (JWT).
 
+## Telegram интеграция (опционально)
+- Для администратора доступна страница `/settings/telegram`:
+  - `bot_token` бота;
+  - `chat_id` группы;
+  - переключатель дублирования `online/offline` событий.
+- Когда бот добавлен в группу, команда `/start` или `/chatid` покажет `chat_id`, который нужно вставить в настройки.
+- Команды бота:
+  - `/run <task_type> [agent_uid]` — запуск проверки через бота;
+  - `/events_on` и `/events_off` — включить/выключить дублирование событий в чат.
+
 ## Поддерживаемые типы задач
 - `check_cpu`
 - `check_ram`

@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta
+import asyncio
 
 from sqlalchemy.orm import Session
 
 from app.models.models import Agent, AgentEvent, AgentProfile, Task, TaskStatus, User, UserAccess
+from app.services.telegram_service import telegram_service
 
 
 EVENT_ONLINE = 'online'
@@ -106,6 +108,11 @@ def get_agent_by_token(db: Session, token: str) -> Agent | None:
 
 def add_agent_event(db: Session, agent: Agent, event_type: str, details: str | None = None) -> None:
     db.add(AgentEvent(agent_id=agent.id, event_type=event_type, details=details))
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(telegram_service.notify_agent_event(agent.agent_uid, event_type, details))
+    except RuntimeError:
+        asyncio.run(telegram_service.notify_agent_event(agent.agent_uid, event_type, details))
 
 
 def touch_agent(db: Session, agent: Agent, payload: dict | None = None) -> None:

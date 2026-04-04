@@ -54,6 +54,10 @@ docker compose logs -f kyss-agent
 ## Troubleshooting
 - `No address associated with hostname`: неверный `BASE_URL` или DNS недоступен для Docker.
 - `[SSL] record layer failure`: чаще всего перепутан протокол. Для `http://...` не нужен TLS, для `https://...` нужен корректный сертификат.
+- `exited with code 137`: обычно это `SIGKILL` (часто OOM или слишком жёсткие лимиты контейнера).
+  - В `.env` увеличьте `AGENT_MEM_LIMIT` (например `768m`/`1g`) и при необходимости `AGENT_CPUS_LIMIT`.
+  - После изменения лимитов перезапустите: `docker compose up -d --build`.
+  - При `docker compose up --build` разовый `137` может появляться во время штатного recreate старого контейнера.
 
 ## Обновление
 ```bash

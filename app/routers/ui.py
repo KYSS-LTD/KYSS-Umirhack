@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
 from app.models.models import Agent, AgentEvent, AgentProfile, Task, TaskScenario, TaskStatus, User
+from app.services.telegram_service import telegram_service
 from app.repositories.repositories import (
     create_task,
     create_user,
@@ -86,6 +87,7 @@ def _build_topology(all_agents: list[Agent]) -> list[dict]:
         angle = 2 * math.pi * idx / total
         topo.append({'uid': agent.agent_uid, 'name': agent.short_name, 'x': int(center_x + radius * math.cos(angle)), 'y': int(center_y + radius * math.sin(angle)), 'online': bool(agent.is_online and not agent.revoked)})
     return topo
+
 
 def _require_permissions(request: Request, db: Session, need_view: bool = False, need_create: bool = False, need_admin: bool = False):
     current_user = _get_ui_user_or_redirect(request, db)
@@ -199,7 +201,6 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
     offline_events_24h = sum(1 for e in recent_events if e.event_type == 'offline' and e.created_at >= cutoff)
 
     topo = _build_topology(all_agents)
-
     return templates.TemplateResponse(
         'dashboard.html',
         {
@@ -237,7 +238,26 @@ def topology_live(request: Request, db: Session = Depends(get_db)):
     mark_offline_agents(db, settings.agent_offline_seconds)
     profiles_by_agent_id = _load_profiles(db)
     all_agents = [_decorate_agent(a, profiles_by_agent_id.get(a.id)) for a in db.query(Agent).order_by(Agent.hostname.asc()).all()]
-    return {'generated_at': datetime.utcnow().isoformat(), 'nodes': _build_topology(all_agents)}
+    recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+    recent_tasks = (
+        db.query(Task)
+        .join(Agent, Task.agent_id == Agent.id)
+        .filter(Task.finished_at.is_not(None), Task.finished_at >= recent_cutoff, Task.status.in_([TaskStatus.done, TaskStatus.failed]))
+        .order_by(Task.finished_at.desc())
+        .limit(30)
+        .all()
+    )
+    task_signals = [
+        {
+            'task_uid': t.task_uid,
+            'agent_uid': t.agent.agent_uid if t.agent else None,
+            'status': t.status.value,
+            'finished_at': t.finished_at.isoformat() if t.finished_at else None,
+        }
+        for t in recent_tasks
+        if t.agent is not None
+    ]
+    return {'generated_at': datetime.utcnow().isoformat(), 'nodes': _build_topology(all_agents), 'task_signals': task_signals}
 @router.get('/tasks/detail/{task_uid}', response_class=HTMLResponse)
 def task_detail(task_uid: str, request: Request, db: Session = Depends(get_db)):
     current_user, access = _require_permissions(request, db, need_view=True)
@@ -420,3 +440,35 @@ def create_task_form(
             create_task(db, task_uid=uuid.uuid4().hex, task_type=task_type, command=cmd, agent_id=agent.id)
 
     return RedirectResponse(url='/', status_code=303)
+
+
+@router.get('/settings/telegram', response_class=HTMLResponse)
+def telegram_settings_page(request: Request, db: Session = Depends(get_db)):
+    current_user, access = _require_permissions(request, db, need_admin=True)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
+    cfg = telegram_service.get_or_create_config(db)
+    return templates.TemplateResponse('telegram_settings.html', {'request': request, 'cfg': cfg, 'current_user': current_user, 'user_access': access})
+
+
+@router.post('/settings/telegram')
+def telegram_settings_save(
+    request: Request,
+    bot_token: str = Form(''),
+    chat_id: str = Form(''),
+    events_enabled: str = Form('off'),
+    db: Session = Depends(get_db),
+):
+    current_user, access = _require_permissions(request, db, need_admin=True)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
+    cfg = telegram_service.get_or_create_config(db)
+    cfg.bot_token = bot_token.strip()[:255] or None
+    cfg.chat_id = chat_id.strip()[:64] or None
+    cfg.events_enabled = events_enabled == 'on'
+    db.commit()
+    return RedirectResponse(url='/settings/telegram', status_code=303)
