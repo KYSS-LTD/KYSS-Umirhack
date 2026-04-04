@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import get_settings
 from app.core.database import Base, engine
 from app.routers import agents, auth, tasks, ui
+from app.services.offline_probe_service import offline_probe_service
 from app.services.telegram_service import telegram_service
 
 settings = get_settings()
@@ -58,3 +59,4 @@ Base.metadata.create_all(bind=engine)
 @app.on_event('startup')
 async def start_background_services():
     asyncio.create_task(telegram_service.polling_loop())
+    asyncio.create_task(offline_probe_service.loop())

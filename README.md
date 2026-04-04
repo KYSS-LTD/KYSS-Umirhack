@@ -123,6 +123,7 @@ python agent/agent.py --base-url https://your-domain-or-host --registration-toke
   - `/probe_offline` — поставить heartbeat-пробу для offline агентов (задачи выполнятся при восстановлении heartbeat);
   - `/events_on` и `/events_off` — включить/выключить дублирование событий в чат.
 - При включённом дублировании в чат отправляются: события `online/offline` и завершение проверок (`done/failed`).
+- Backend автоматически ставит периодические `check_system_info` пробы для offline агентов (с cooldown), чтобы сразу проверить их после восстановления heartbeat.
 
 ## Поддерживаемые типы задач
 - `check_cpu`
