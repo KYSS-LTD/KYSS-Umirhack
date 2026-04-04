@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
-from app.models.models import Agent, AgentEvent, AgentProfile, Task, TaskScenario, User
+from app.models.models import Agent, AgentEvent, AgentProfile, Task, TaskScenario, TaskStatus, User
 from app.repositories.repositories import (
     create_task,
     create_user,
@@ -281,6 +281,34 @@ def rename_agent(agent_uid: str, request: Request, custom_name: str = Form(''), 
     profile.custom_name = custom_name.strip()[:120] or None
     db.commit()
     return RedirectResponse(url=f'/agents/{agent_uid}', status_code=303)
+
+
+@router.post('/agents/{agent_uid}/delete')
+def delete_agent(agent_uid: str, request: Request, db: Session = Depends(get_db)):
+    current_user, access = _require_permissions(request, db, need_admin=True)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
+
+    agent = db.query(Agent).filter(Agent.agent_uid == agent_uid).first()
+    if not agent:
+        return RedirectResponse(url='/', status_code=303)
+
+    tasks = db.query(Task).filter(Task.agent_id == agent.id).all()
+    for task in tasks:
+        if task.status in {TaskStatus.pending, TaskStatus.running}:
+            task.status = TaskStatus.failed
+            task.result = 'agent deleted by admin'
+            task.logs = task.result
+            task.finished_at = datetime.utcnow()
+        task.agent_id = None
+
+    db.query(AgentProfile).filter(AgentProfile.agent_id == agent.id).delete()
+    db.query(AgentEvent).filter(AgentEvent.agent_id == agent.id).delete()
+    db.delete(agent)
+    db.commit()
+    return RedirectResponse(url='/', status_code=303)
 
 
 @router.get('/admin/users', response_class=HTMLResponse)
