@@ -158,37 +158,6 @@
   </div>
 
   <div class="col-12">
-    <div class="card p-3 mb-3">
-      <h2 class="h5 mb-3">Heartbeat монитор (как задачи)</h2>
-      <div class="table-responsive">
-        <table class="table align-middle mb-0">
-          <thead><tr><th>Агент</th><th>Heartbeat status</th><th>Сводка</th><th>Последний heartbeat</th></tr></thead>
-          <tbody id="heartbeatTableBody">
-          {% for h in heartbeat_rows %}
-            <tr>
-              <td class="mono"><a href="/agents/{{ h.agent_uid }}">{{ h.display_name }}</a><div class="small text-secondary">{{ h.agent_uid }}</div></td>
-              <td>
-                {% if h.level == 'OK' %}
-                  <span class="badge text-bg-success">OK</span>
-                {% elif h.level == 'WARN' %}
-                  <span class="badge text-bg-warning">WARN</span>
-                {% else %}
-                  <span class="badge text-bg-danger">CRIT</span>
-                {% endif %}
-              </td>
-              <td>{{ h.summary }}</td>
-              <td>{{ h.last_seen_at or '-' }}</td>
-            </tr>
-          {% else %}
-            <tr><td colspan="4" class="text-secondary">Нет данных heartbeat.</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-12">
     <div class="card p-3">
       <h2 class="h5 mb-3">Последние задачи</h2>
       <div class="table-responsive">
@@ -219,6 +188,7 @@
 
   const svg = document.getElementById('topologySvg');
   const ns = 'http://www.w3.org/2000/svg';
+  const seenTaskSignals = new Set();
 
   function drawTopology(nodes) {
     if (!svg) return;
@@ -291,6 +261,40 @@
     });
   }
 
+  function animateTaskSignal(signal, node) {
+    if (!svg || !node || !signal?.task_uid) return;
+    const signalUid = String(signal.task_uid).replace(/[^a-zA-Z0-9_-]/g, '');
+    const motionPathId = `task-path-${signalUid}`;
+    const path = document.createElementNS(ns, 'path');
+    const curveX = (250 + Number(node.x)) / 2 + 20;
+    const curveY = (180 + Number(node.y)) / 2 - 18;
+    path.setAttribute('id', motionPathId);
+    path.setAttribute('d', `M${node.x} ${node.y} Q ${curveX} ${curveY}, 250 180`);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'transparent');
+    svg.appendChild(path);
+
+    const packet = document.createElementNS(ns, 'circle');
+    packet.setAttribute('r', '4.5');
+    packet.setAttribute('fill', signal.status === 'done' ? '#22c55e' : '#ef4444');
+    packet.innerHTML = `<animateMotion dur="1.1s" repeatCount="1" fill="freeze"><mpath href="#${motionPathId}" /></animateMotion>`;
+    svg.appendChild(packet);
+
+    setTimeout(() => {
+      packet.remove();
+      path.remove();
+      const marker = document.createElementNS(ns, 'text');
+      marker.setAttribute('x', '263');
+      marker.setAttribute('y', signal.status === 'done' ? '168' : '158');
+      marker.setAttribute('font-size', '16');
+      marker.setAttribute('font-weight', '700');
+      marker.setAttribute('fill', signal.status === 'done' ? '#16a34a' : '#dc2626');
+      marker.textContent = signal.status === 'done' ? '✓' : '✕';
+      svg.appendChild(marker);
+      setTimeout(() => marker.remove(), 1700);
+    }, 1150);
+  }
+
   drawTopology({{ topology_json | safe }});
 
   async function refreshDashboardSections() {
@@ -311,7 +315,6 @@
         ['#metricsRow', '#metricsRow'],
         ['#agentsTableBody', '#agentsTableBody'],
         ['#eventsTimeline', '#eventsTimeline'],
-        ['#heartbeatTableBody', '#heartbeatTableBody'],
         ['#tasksTableBody', '#tasksTableBody'],
       ];
       map.forEach(([targetSel, sourceSel]) => {
@@ -332,6 +335,13 @@
       if (!resp.ok) return;
       const payload = await resp.json();
       drawTopology(payload.nodes || []);
+      const nodeByUid = new Map((payload.nodes || []).map((n) => [n.uid, n]));
+      (payload.task_signals || []).forEach((signal) => {
+        const key = `${signal.task_uid}:${signal.status}:${signal.finished_at || ''}`;
+        if (seenTaskSignals.has(key)) return;
+        seenTaskSignals.add(key);
+        animateTaskSignal(signal, nodeByUid.get(signal.agent_uid));
+      });
     } catch (e) {
       console.debug('topology polling failed', e);
     }

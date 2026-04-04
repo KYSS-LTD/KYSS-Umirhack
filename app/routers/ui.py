@@ -88,18 +88,6 @@ def _build_topology(all_agents: list[Agent]) -> list[dict]:
     return topo
 
 
-def _heartbeat_status(agent: Agent, now: datetime) -> dict:
-    if agent.revoked:
-        return {'level': 'CRIT', 'summary': 'revoked', 'age_sec': None}
-    if not agent.last_seen_at:
-        return {'level': 'CRIT', 'summary': 'нет heartbeat', 'age_sec': None}
-    age = int((now - agent.last_seen_at).total_seconds())
-    if agent.is_online and age <= settings.agent_offline_seconds:
-        return {'level': 'OK', 'summary': f'online ({age}s ago)', 'age_sec': age}
-    if age <= settings.agent_offline_seconds * 2:
-        return {'level': 'WARN', 'summary': f'stale heartbeat ({age}s ago)', 'age_sec': age}
-    return {'level': 'CRIT', 'summary': f'offline ({age}s ago)', 'age_sec': age}
-
 def _require_permissions(request: Request, db: Session, need_view: bool = False, need_create: bool = False, need_admin: bool = False):
     current_user = _get_ui_user_or_redirect(request, db)
     if isinstance(current_user, RedirectResponse):
@@ -212,20 +200,6 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
     offline_events_24h = sum(1 for e in recent_events if e.event_type == 'offline' and e.created_at >= cutoff)
 
     topo = _build_topology(all_agents)
-    now = datetime.utcnow()
-    heartbeat_rows = []
-    for a in all_agents:
-        hb = _heartbeat_status(a, now)
-        heartbeat_rows.append(
-            {
-                'agent_uid': a.agent_uid,
-                'display_name': a.display_name,
-                'level': hb['level'],
-                'summary': hb['summary'],
-                'last_seen_at': a.last_seen_at,
-            }
-        )
-
     return templates.TemplateResponse(
         'dashboard.html',
         {
@@ -234,7 +208,6 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
             'all_agents': all_agents,
             'tasks': tasks,
             'events': recent_events,
-            'heartbeat_rows': heartbeat_rows,
             'filters': {'agent_uid': agent_uid, 'status': status, 'task_type': task_type},
             'metrics': {
                 'online_count': sum(1 for a in all_agents if a.is_online and not a.revoked),
@@ -264,7 +237,26 @@ def topology_live(request: Request, db: Session = Depends(get_db)):
     mark_offline_agents(db, settings.agent_offline_seconds)
     profiles_by_agent_id = _load_profiles(db)
     all_agents = [_decorate_agent(a, profiles_by_agent_id.get(a.id)) for a in db.query(Agent).order_by(Agent.hostname.asc()).all()]
-    return {'generated_at': datetime.utcnow().isoformat(), 'nodes': _build_topology(all_agents)}
+    recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+    recent_tasks = (
+        db.query(Task)
+        .join(Agent, Task.agent_id == Agent.id)
+        .filter(Task.finished_at.is_not(None), Task.finished_at >= recent_cutoff, Task.status.in_([TaskStatus.done, TaskStatus.failed]))
+        .order_by(Task.finished_at.desc())
+        .limit(30)
+        .all()
+    )
+    task_signals = [
+        {
+            'task_uid': t.task_uid,
+            'agent_uid': t.agent.agent_uid if t.agent else None,
+            'status': t.status.value,
+            'finished_at': t.finished_at.isoformat() if t.finished_at else None,
+        }
+        for t in recent_tasks
+        if t.agent is not None
+    ]
+    return {'generated_at': datetime.utcnow().isoformat(), 'nodes': _build_topology(all_agents), 'task_signals': task_signals}
 @router.get('/tasks/detail/{task_uid}', response_class=HTMLResponse)
 def task_detail(task_uid: str, request: Request, db: Session = Depends(get_db)):
     current_user, access = _require_permissions(request, db, need_view=True)
