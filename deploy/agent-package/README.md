@@ -1,0 +1,50 @@
+# Agent package (standalone)
+
+Этот пакет можно **скопировать на сервер целиком** и запустить агент одной командой Docker Compose.
+
+## 1) Подготовка
+```bash
+cp .env.example .env
+# заполните BASE_URL и REGISTRATION_TOKEN
+```
+
+## 2) Запуск
+```bash
+docker compose up -d --build
+```
+
+## 3) Проверка логов
+```bash
+docker compose logs -f kyss-agent
+```
+
+## Что сделано для безопасности
+- контейнер запущен от non-root пользователя;
+- read-only root filesystem;
+- отдельный volume `/agent-data` только для ключей и config;
+- `no-new-privileges`, `cap_drop: [ALL]`, `pids_limit`, лимиты CPU/RAM;
+- TLS verification включена по умолчанию (`VERIFY_TLS=true`).
+- `run_command` выполняется только из allowlist и только через trusted binaries (`/bin`, `/usr/bin`, `/usr/sbin`, `/sbin`) без shell.
+
+## Предустановленные инструменты в образе
+В изолированный Docker-образ агента добавлены утилиты диагностики:
+- `procps` (`uptime`, `free`),
+- `iproute2`, `iputils-ping`, `net-tools`,
+- `dnsutils`, `curl`, `ca-certificates`.
+
+Это убирает ошибки вида «команда не найдена» при выполнении задач и ручной диагностике в контейнере.
+
+## Отказоустойчивость
+- если DNS/сеть недоступны при старте, агент **не падает**, а уходит в retry с backoff;
+- при потере сети агент продолжает попытки и сам восстанавливается после возврата сети;
+- при `401 Unauthorized` агент автоматически перерегистрируется с тем же `agent_uid` и обновляет токен.
+
+## Troubleshooting
+- `No address associated with hostname`: неверный `BASE_URL` или DNS недоступен для Docker.
+- `[SSL] record layer failure`: чаще всего перепутан протокол. Для `http://...` не нужен TLS, для `https://...` нужен корректный сертификат.
+
+## Обновление
+```bash
+docker compose pull && docker compose up -d
+```
+(или `--build`, если пакет изменён локально)

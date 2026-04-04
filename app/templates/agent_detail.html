@@ -3,29 +3,61 @@
 {% block content %}
 <a class="btn btn-link ps-0" href="/">← Назад к панели</a>
 <div class="card p-3 mb-3">
-  <h1 class="h4 mb-3">Агент {{ agent.agent_uid if agent else 'не найден' }}</h1>
+  <h1 class="h4 mb-2">Агент {{ agent.agent_uid if agent else 'не найден' }}</h1>
+  {% if agent %}<p class="text-secondary mb-3">Имя: <strong>{{ agent.display_name }}</strong></p>{% endif %}
   {% if agent %}
   <div class="row g-3">
     <div class="col-md-6"><strong>Хост:</strong> {{ agent.hostname }}</div>
     <div class="col-md-6"><strong>Статус:</strong> {{ 'Online' if agent.is_online else 'Offline' }}</div>
     <div class="col-md-6"><strong>Last seen:</strong> {{ agent.last_seen_at }}</div>
-    <div class="col-md-6"><strong>IP:</strong> {{ agent.ip_addresses or '-' }}</div>
+    <div class="col-md-6"><strong>IP / расположение сервера:</strong> {{ agent.ip_addresses or '-' }}</div>
     <div class="col-md-6"><strong>OS:</strong> {{ agent.os_version or '-' }}</div>
     <div class="col-md-6"><strong>Интерфейсы:</strong> {{ agent.network_interfaces or '-' }}</div>
   </div>
   {% else %}
   <p class="text-danger mb-0">Агент не найден.</p>
   {% endif %}
+  {% if agent %}
+  <form method="post" action="/agents/{{ agent.agent_uid }}/rename" class="row g-2 mt-2">
+    <div class="col-12 col-md-8">
+      <label class="form-label">Переименовать агента (alias)</label>
+      <input class="form-control" type="text" name="custom_name" value="{{ agent.display_name }}" maxlength="120" placeholder="Например: PROD-EU-1" />
+      <div class="form-text">Alias отображается в UI и не влияет на технический `agent_uid`.</div>
+    </div>
+    <div class="col-12 col-md-4 d-flex align-items-end">
+      <button class="btn btn-outline-primary w-100" type="submit">Сохранить имя</button>
+    </div>
+  </form>
+  {% endif %}
 </div>
 
-<div class="card p-3">
-  <h2 class="h5 mb-3">Последние задачи агента</h2>
-  <ul class="list-group list-group-flush">
-    {% for t in tasks %}
-      <li class="list-group-item px-0"><span class="mono">{{ t.task_uid }}</span> — {{ t.status.value }} — {{ (t.logs or t.result or '-')[:100] }}</li>
-    {% else %}
-      <li class="list-group-item px-0 text-secondary">Задач для агента пока нет.</li>
-    {% endfor %}
-  </ul>
+<div class="row g-3">
+  <div class="col-12 col-lg-7">
+    <div class="card p-3">
+      <h2 class="h5 mb-3">Последние задачи агента</h2>
+      <ul class="list-group list-group-flush">
+        {% for t in tasks %}
+          <li class="list-group-item px-0"><span class="mono">{{ t.task_uid }}</span> — {{ t.status.value }} — {{ (t.logs or t.result or '-')[:100] }}</li>
+        {% else %}
+          <li class="list-group-item px-0 text-secondary">Задач для агента пока нет.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="col-12 col-lg-5">
+    <div class="card p-3">
+      <h2 class="h5 mb-3">События доступности</h2>
+      <ul class="list-group list-group-flush">
+        {% for e in events %}
+          <li class="list-group-item px-0 d-flex justify-content-between">
+            <span>{% if e.event_type == 'offline' %}🔴{% else %}🟢{% endif %} {{ e.event_type }}</span>
+            <span class="text-secondary small">{{ e.created_at }}</span>
+          </li>
+        {% else %}
+          <li class="list-group-item px-0 text-secondary">Событий пока нет.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
 </div>
 {% endblock %}

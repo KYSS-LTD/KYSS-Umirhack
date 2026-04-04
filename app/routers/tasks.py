@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.models import Agent, TaskStatus
-from app.repositories.repositories import create_task, get_agent_by_uid, get_task_by_uid
+from app.repositories.repositories import create_task, ensure_user_access, get_agent_by_uid, get_task_by_uid
 from app.schemas.agent import SignedEnvelope
 from app.schemas.task import TaskCreateRequest
 from app.services.auth_services import get_current_user
@@ -18,8 +18,11 @@ settings = get_settings()
 
 
 @router.post('/api/tasks')
-def create_task_endpoint(payload: TaskCreateRequest, request: Request, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def create_task_endpoint(payload: TaskCreateRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     limit_request(request, scope='task-create', limit=60)
+    access = ensure_user_access(db, current_user)
+    if not (access.is_admin or access.can_create_tasks):
+        raise HTTPException(status_code=403, detail='Недостаточно прав на создание задач')
     if payload.task_type not in settings.allowed_task_type_set:
         raise HTTPException(status_code=400, detail='Недопустимый тип задачи')
     if payload.task_type == 'run_command' and payload.command not in settings.allowed_command_set:

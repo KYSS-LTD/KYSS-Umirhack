@@ -59,6 +59,26 @@ docker-compose up --build
 - `EMAIL`
 - `CORS_ORIGINS`
 
+## Запуск агента как переносимого Docker-пакета (рекомендуется)
+Чтобы запустить агента на отдельном сервере, теперь можно просто скопировать папку `deploy/agent-package`.
+
+```bash
+# на сервере агента
+cp -r deploy/agent-package /opt/kyss-agent
+cd /opt/kyss-agent
+cp .env.example .env
+# заполните BASE_URL и REGISTRATION_TOKEN
+
+docker compose up -d --build
+```
+
+Логи агента:
+```bash
+docker compose logs -f kyss-agent
+```
+
+В составе `deploy/agent-package` Docker-образ теперь включает диагностические утилиты (`uptime/free`, `iproute2`, `ping`, `dnsutils`, `curl`), чтобы задачи агента не падали из-за отсутствия системных инструментов.
+
 ## Регистрация и запуск агента
 ### Вариант 1 (скрипт установки)
 ```bash
@@ -67,8 +87,10 @@ BASE_URL=https://your-domain-or-host REGISTRATION_TOKEN=... bash scripts/install
 
 ### Вариант 2 (ручной запуск)
 ```bash
-python agent/agent.py --base-url https://your-domain-or-host --registration-token YOUR_TOKEN
+python agent/agent.py --base-url https://your-domain-or-host --registration-token YOUR_TOKEN --log-level INFO
 ```
+
+Опционально: `--verify-tls false` только для локального self-signed окружения.
 
 При регистрации backend выдаёт:
 - `agent_id`
@@ -93,10 +115,12 @@ python agent/agent.py --base-url https://your-domain-or-host --registration-toke
 - `check_disk`
 - `check_ports`
 - `check_system_info`
-- `run_command` (только из whitelist `ALLOWED_COMMANDS`)
+- `run_command` (только из whitelist `ALLOWED_COMMANDS`, без shell и только trusted binaries)
 
 ## Надёжность
 - heartbeat каждые 5–10 сек;
 - агент помечается offline при отсутствии heartbeat;
+- при потере сети агент автоматически продолжает retry и восстанавливается после возвращения сети;
+- при `401 Unauthorized` агент сам перерегистрируется и обновляет `agent_token`;
 - базовый retry задачи при fail (`max_retries=1` по умолчанию);
 - timeout выполнения задач на агенте.
