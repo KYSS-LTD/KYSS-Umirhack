@@ -16,13 +16,13 @@ import httpx
 import nacl.encoding
 import nacl.signing
 
-CONFIG_DIR = Path.home() / '.agent'
+CONFIG_DIR = Path(os.getenv('AGENT_CONFIG_DIR', '/agent-data'))
 PRIVATE_KEY_PATH = CONFIG_DIR / 'private.key'
 PUBLIC_KEY_PATH = CONFIG_DIR / 'public.key'
 CONFIG_PATH = CONFIG_DIR / 'config.json'
 DEFAULT_INTERVAL = 5
-MIN_INTERVAL = 5
 MAX_INTERVAL = 10
+MIN_INTERVAL = 5
 
 logger = logging.getLogger('kyss-agent')
 
@@ -39,6 +39,7 @@ def configure_logging(level: str) -> None:
 def ensure_keys() -> tuple[str, str]:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if PRIVATE_KEY_PATH.exists() and PUBLIC_KEY_PATH.exists():
+        logger.debug('Using existing Ed25519 key pair from %s', CONFIG_DIR)
         return PRIVATE_KEY_PATH.read_text().strip(), PUBLIC_KEY_PATH.read_text().strip()
 
     signing_key = nacl.signing.SigningKey.generate()
@@ -139,6 +140,7 @@ def register(base_url: str, token: str, verify_tls: bool, agent_uid: str | None 
         data = r.json()
     cfg = {'base_url': base_url, 'agent_uid': data['agent_id'], 'public_key': public_key, 'agent_token': data['agent_token']}
     CONFIG_PATH.write_text(json.dumps(cfg))
+    logger.info('Agent registration complete. agent_uid=%s', data['agent_id'])
     return private_key, cfg
 
 
@@ -146,7 +148,7 @@ def load_or_register(base_url: str, token: str, verify_tls: bool):
     if CONFIG_PATH.exists():
         cfg = json.loads(CONFIG_PATH.read_text())
         private_key, _ = ensure_keys()
-        logger.info('Loaded config for existing agent_uid=%s', cfg.get('agent_uid'))
+        logger.info('Loaded existing agent config from %s for agent_uid=%s', CONFIG_PATH, cfg.get('agent_uid'))
         return private_key, cfg
     return register(base_url, token, verify_tls)
 
@@ -155,7 +157,7 @@ def loop(base_url: str, agent_uid: str, agent_token: str, private_key: str, publ
     allowed = {c.strip() for c in os.getenv('ALLOWED_COMMANDS', 'uptime,df -h,free -m').split(',') if c.strip()}
     headers = {'Authorization': f'Bearer {agent_token}'}
     sleep_time = max(MIN_INTERVAL, min(interval, MAX_INTERVAL))
-    logger.info('Agent loop started with interval=%s', sleep_time)
+    logger.info('Agent loop started. heartbeat_interval=%ss allowed_commands=%s', sleep_time, sorted(allowed))
     while True:
         now = int(time.time())
         hb_payload = {
@@ -175,6 +177,7 @@ def loop(base_url: str, agent_uid: str, agent_token: str, private_key: str, publ
         try:
             with httpx.Client(timeout=10, verify=verify_tls, headers=headers) as client:
                 client.post(f'{base_url}/api/agents/heartbeat', json=envelope).raise_for_status()
+                logger.debug('Heartbeat sent for agent_uid=%s', agent_uid)
                 task_resp = client.post(f'{base_url}/api/agents/tasks/next', json=envelope)
                 task_resp.raise_for_status()
                 task = task_resp.json().get('task')
@@ -202,17 +205,20 @@ def str_to_bool(value: str) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description='KYSSCHECK Agent')
-    parser.add_argument('--base-url', required=True)
-    parser.add_argument('--registration-token', required=True)
-    parser.add_argument('--interval', type=int, default=DEFAULT_INTERVAL)
+    parser.add_argument('--base-url', default=os.getenv('BASE_URL'))
+    parser.add_argument('--registration-token', default=os.getenv('REGISTRATION_TOKEN'))
+    parser.add_argument('--interval', type=int, default=int(os.getenv('AGENT_INTERVAL', str(DEFAULT_INTERVAL))))
     parser.add_argument('--log-level', default=os.getenv('LOG_LEVEL', 'INFO'))
     parser.add_argument('--verify-tls', default=os.getenv('VERIFY_TLS', 'true'))
     args = parser.parse_args()
 
+    if not args.base_url or not args.registration_token:
+        raise SystemExit('BASE_URL and REGISTRATION_TOKEN are required (via args or env).')
+
     configure_logging(args.log_level)
     verify_tls = str_to_bool(args.verify_tls)
     if not verify_tls:
-        logger.warning('TLS verification is disabled via --verify-tls/VERIFY_TLS.')
+        logger.warning('TLS certificate verification is disabled (VERIFY_TLS=false). Use only for local debugging.')
 
     private, cfg = load_or_register(args.base_url, args.registration_token, verify_tls)
     public = PUBLIC_KEY_PATH.read_text().strip()
