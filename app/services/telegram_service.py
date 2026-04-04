@@ -164,7 +164,8 @@ class TelegramService:
                     '/chatid - показать chat id\n'
                     '/events_on - включить дублирование событий\n'
                     '/events_off - выключить дублирование событий\n'
-                    '/run <task_type> [agent_uid] - запустить проверку'
+                    '/run - запустить проверку через инлайн-меню\n'
+                    '/probe_offline - поставить heartbeat-пробу offline агентам'
                 )
                 await self.send_message(bot_token, chat_id, intro, message_thread_id=message_thread_id)
                 return
@@ -203,6 +204,25 @@ class TelegramService:
                     'Выберите агента:',
                     message_thread_id=message_thread_id,
                     reply_markup={'inline_keyboard': keyboard},
+                )
+                return
+
+            if command == '/probe_offline':
+                offline_agents = db.query(Agent).filter((Agent.is_online.is_(False)) | (Agent.revoked.is_(True))).all()
+                if not offline_agents:
+                    await self.send_message(bot_token, chat_id, 'Сейчас offline-агентов нет.', message_thread_id=message_thread_id)
+                    return
+                task_type = 'check_system_info' if 'check_system_info' in settings.allowed_task_type_set else sorted(settings.allowed_task_type_set)[0]
+                created = 0
+                for agent in offline_agents:
+                    db.add(Task(task_uid=uuid.uuid4().hex, task_type=task_type, command=None, status=TaskStatus.pending, agent_id=agent.id))
+                    created += 1
+                db.commit()
+                await self.send_message(
+                    bot_token,
+                    chat_id,
+                    f'Поставил heartbeat-пробу для {created} offline агентов. Как только они включатся и пришлют heartbeat, задачи выполнятся.',
+                    message_thread_id=message_thread_id,
                 )
                 return
         finally:
