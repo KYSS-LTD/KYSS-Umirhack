@@ -201,6 +201,9 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# local runtime data for standalone deploy package
+deploy/agent-package/agent-data/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
