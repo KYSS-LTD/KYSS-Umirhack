@@ -1,0 +1,100 @@
+services:
+  backend:
+    build: .
+    container_name: kysscheck-backend
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "python scripts/wait_for_services.py postgres:5432 redis:6379 && gunicorn -k uvicorn.workers.UvicornWorker app.main:app -b 0.0.0.0:8000"
+      ]
+
+  postgres:
+    image: postgres:16
+    container_name: kysscheck-postgres
+    environment:
+      POSTGRES_DB: kysscheck
+      POSTGRES_USER: kyss
+      POSTGRES_PASSWORD: kyss
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kyss -d kysscheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    container_name: kysscheck-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  celery_worker:
+    build: .
+    container_name: kysscheck-worker
+    env_file: .env
+    depends_on:
+      - redis
+      - postgres
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "python scripts/wait_for_services.py postgres:5432 redis:6379 && celery -A app.celery_app.celery_app worker --loglevel=info"
+      ]
+
+  nginx:
+    build:
+      context: ./nginx
+    container_name: kysscheck-nginx
+    env_file: .env
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8000:8000"
+    volumes:
+      - certs:/certs
+      - certbot_webroot:/var/www/certbot
+
+  certbot_init:
+    image: certbot/certbot:latest
+    container_name: kysscheck-certbot-init
+    env_file: .env
+    depends_on:
+      - nginx
+    volumes:
+      - certs:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    entrypoint: >-
+      /bin/sh -c 'if [ "$DOMAIN" = "localhost" ] || ! echo "$DOMAIN" | grep -q "\\.";
+      then echo "[certbot-init] local domain, skip LE"; exit 0; fi;
+      certbot certonly --webroot -w /var/www/certbot --email "$EMAIL" --agree-tos --non-interactive --keep-until-expiring -d "$DOMAIN"'
+
+  certbot_renew:
+    image: certbot/certbot:latest
+    container_name: kysscheck-certbot-renew
+    env_file: .env
+    depends_on:
+      - nginx
+    volumes:
+      - certs:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    entrypoint: >-
+      /bin/sh -c 'if [ "$DOMAIN" = "localhost" ] || ! echo "$DOMAIN" | grep -q "\\.";
+      then echo "[certbot-renew] local domain, idle"; tail -f /dev/null; fi;
+      while true; do certbot renew --webroot -w /var/www/certbot --quiet || true; sleep 12h; done'
+
+volumes:
+  postgres_data:
+  certs:
+  certbot_webroot:

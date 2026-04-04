@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Агент — KYSSCHECK{% endblock %}
+{% block content %}
+<a class="btn btn-link ps-0" href="/">← Назад к панели</a>
+<div class="card p-3 mb-3">
+  <h1 class="h4 mb-3">Агент {{ agent.agent_uid if agent else 'не найден' }}</h1>
+  {% if agent %}
+  <div class="row g-3">
+    <div class="col-md-6"><strong>Хост:</strong> {{ agent.hostname }}</div>
+    <div class="col-md-6"><strong>Статус:</strong> {{ 'Online' if agent.is_online else 'Offline' }}</div>
+    <div class="col-md-6"><strong>Last seen:</strong> {{ agent.last_seen_at }}</div>
+    <div class="col-md-6"><strong>IP:</strong> {{ agent.ip_addresses or '-' }}</div>
+    <div class="col-md-6"><strong>OS:</strong> {{ agent.os_version or '-' }}</div>
+    <div class="col-md-6"><strong>Интерфейсы:</strong> {{ agent.network_interfaces or '-' }}</div>
+  </div>
+  {% else %}
+  <p class="text-danger mb-0">Агент не найден.</p>
+  {% endif %}
+</div>
+
+<div class="card p-3">
+  <h2 class="h5 mb-3">Последние задачи агента</h2>
+  <ul class="list-group list-group-flush">
+    {% for t in tasks %}
+      <li class="list-group-item px-0"><span class="mono">{{ t.task_uid }}</span> — {{ t.status.value }} — {{ (t.logs or t.result or '-')[:100] }}</li>
+    {% else %}
+      <li class="list-group-item px-0 text-secondary">Задач для агента пока нет.</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}

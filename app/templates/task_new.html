@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Новая задача — KYSSCHECK{% endblock %}
+{% block content %}
+<a class="btn btn-link ps-0" href="/">← Назад к панели</a>
+<div class="card p-4">
+  <h1 class="h4 mb-3">Создать задачу</h1>
+  <form method="post" action="/tasks/new" class="row g-3">
+    <div class="col-12 col-md-6">
+      <label class="form-label">Тип задачи</label>
+      <select class="form-select" name="task_type">
+        {% for t in allowed_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+      </select>
+    </div>
+
+    <div class="col-12 col-md-6">
+      <label class="form-label">Назначить агенту</label>
+      <select class="form-select" name="agent_uid">
+        <option value="">любой</option>
+        {% for a in agents %}<option value="{{ a.agent_uid }}">{{ a.hostname }} ({{ a.agent_uid }})</option>{% endfor %}
+      </select>
+    </div>
+
+    <div class="col-12">
+      <label class="form-label">Команда (только для run_command)</label>
+      <input class="form-control" type="text" name="command" placeholder="например: uptime" />
+    </div>
+
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Создать задачу</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
