@@ -206,7 +206,7 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
     )
 
 
-@router.get('/tasks/{task_uid}', response_class=HTMLResponse)
+@router.get('/tasks/detail/{task_uid}', response_class=HTMLResponse)
 def task_detail(task_uid: str, request: Request, db: Session = Depends(get_db)):
     current_user, access = _require_permissions(request, db, need_view=True)
     if isinstance(current_user, RedirectResponse):
