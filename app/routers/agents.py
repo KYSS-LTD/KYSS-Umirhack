@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.models import Agent
-from app.repositories.repositories import create_or_update_agent, get_next_task_for_agent, mark_offline_agents, touch_agent
+from app.repositories.repositories import (
+    create_or_update_agent,
+    fail_running_tasks_for_offline_agents,
+    fail_stale_running_tasks,
+    get_next_task_for_agent,
+    mark_offline_agents,
+    touch_agent,
+)
 from app.schemas.agent import AgentRegisterRequest, SignedEnvelope
 from app.services.rate_limit import limit_request
 from app.services.security_services import get_agent_and_validate_uid, get_agent_from_bearer, verify_agent_signature_if_present
@@ -44,6 +51,8 @@ def _heartbeat(envelope: SignedEnvelope, request: Request, db: Session, bearer_a
     verify_agent_signature_if_present(agent, envelope.payload, envelope.timestamp, envelope.signature, envelope.nonce)
     touch_agent(db, agent, payload=envelope.payload)
     mark_offline_agents(db, offline_seconds=settings.agent_offline_seconds)
+    fail_running_tasks_for_offline_agents(db)
+    fail_stale_running_tasks(db, timeout_seconds=settings.task_execution_timeout_seconds)
     return {'status': 'alive', 'last_seen': datetime.utcnow().isoformat()}
 
 
@@ -69,6 +78,9 @@ def next_task(
     limit_request(request, scope=f'tasks-next:{bearer_agent.agent_uid}', limit=120)
     agent = get_agent_and_validate_uid(db, bearer_agent, envelope.agent_uid)
     verify_agent_signature_if_present(agent, envelope.payload, envelope.timestamp, envelope.signature, envelope.nonce)
+    mark_offline_agents(db, offline_seconds=settings.agent_offline_seconds)
+    fail_running_tasks_for_offline_agents(db)
+    fail_stale_running_tasks(db, timeout_seconds=settings.task_execution_timeout_seconds)
     task = get_next_task_for_agent(db, agent)
     if not task:
         return {'task': None}
