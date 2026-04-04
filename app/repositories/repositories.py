@@ -107,6 +107,18 @@ def get_agent_by_token(db: Session, token: str) -> Agent | None:
 
 
 def add_agent_event(db: Session, agent: Agent, event_type: str, details: str | None = None) -> None:
+    recent_duplicate = (
+        db.query(AgentEvent)
+        .filter(
+            AgentEvent.agent_id == agent.id,
+            AgentEvent.event_type == event_type,
+            AgentEvent.created_at >= datetime.utcnow() - timedelta(seconds=90),
+        )
+        .order_by(AgentEvent.created_at.desc())
+        .first()
+    )
+    if recent_duplicate:
+        return
     db.add(AgentEvent(agent_id=agent.id, event_type=event_type, details=details))
     try:
         loop = asyncio.get_running_loop()
