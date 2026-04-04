@@ -17,6 +17,8 @@ import httpx
 import nacl.encoding
 import nacl.signing
 
+from agent.diagnostics import execute_task, format_result, parse_task_params, truncate_text
+
 CONFIG_DIR = Path.home() / '.agent'
 PRIVATE_KEY_PATH = CONFIG_DIR / 'private.key'
 PUBLIC_KEY_PATH = CONFIG_DIR / 'public.key'
@@ -116,13 +118,16 @@ def run_task(task: dict, allowed_commands: dict[str, list[str]], timeout_sec: in
     try:
         if task_type == 'check_cpu':
             out = subprocess.check_output([get_safe_executable('uptime')], text=True, timeout=5)
-            return 'done', out[:4000], out[:4000]
+            out = truncate_text(out)
+            return 'done', out, out
         if task_type == 'check_ram':
             out = subprocess.check_output([get_safe_executable('free'), '-m'], text=True, timeout=5)
-            return 'done', out[:4000], out[:4000]
+            out = truncate_text(out)
+            return 'done', out, out
         if task_type == 'check_disk':
             out = subprocess.check_output([get_safe_executable('df'), '-h'], text=True, timeout=5)
-            return 'done', out[:4000], out[:4000]
+            out = truncate_text(out)
+            return 'done', out, out
         if task_type == 'check_ports':
             ports = [22, 80, 443]
             states = []
@@ -133,6 +138,7 @@ def run_task(task: dict, allowed_commands: dict[str, list[str]], timeout_sec: in
                 states.append(f'{p}:{"open" if code == 0 else "closed"}')
                 s.close()
             result = ', '.join(states)
+            result = truncate_text(result)
             return 'done', result, result
         if task_type == 'check_system_info':
             result = {
@@ -142,8 +148,8 @@ def run_task(task: dict, allowed_commands: dict[str, list[str]], timeout_sec: in
                 'network_interfaces': get_local_ips(),
                 'connectivity': 'ok' if socket.gethostbyname('localhost') else 'failed',
             }
-            text = json.dumps(result, ensure_ascii=False)
-            return 'done', text[:4000], text[:4000]
+            text = truncate_text(json.dumps(result, ensure_ascii=False))
+            return 'done', text, text
         if task_type == 'run_command':
             cmd = task.get('command', '')
             args = allowed_commands.get(cmd)
@@ -151,13 +157,20 @@ def run_task(task: dict, allowed_commands: dict[str, list[str]], timeout_sec: in
                 logger.warning('Rejected command by allowlist: %s', cmd)
                 return 'failed', 'команда отклонена whitelist', 'команда отклонена whitelist'
             result = subprocess.run(args, capture_output=True, text=True, timeout=timeout_sec, check=False)
-            output = (result.stdout + '\n' + result.stderr)[:4000]
+            output = truncate_text(result.stdout + '\n' + result.stderr)
             return ('done' if result.returncode == 0 else 'failed', output, output)
+
+        params = parse_task_params(task)
+        diagnostic = execute_task(task_type, params)
+        payload = format_result(diagnostic)
+        status = 'done' if diagnostic.get('level') != 'CRIT' else 'failed'
+        return status, payload, payload
+    except KeyError:
         return 'failed', 'неизвестный тип задачи', 'неизвестный тип задачи'
     except Exception as exc:
         logger.exception('Task execution failed task_uid=%s: %s', task_uid, exc)
-        msg = f'ошибка выполнения: {exc}'
-        return 'failed', msg[:4000], msg[:4000]
+        msg = truncate_text(f'ошибка выполнения: {exc}')
+        return 'failed', msg, msg
 
 
 def build_envelope(agent_uid: str, private_key: str, payload: dict) -> dict:

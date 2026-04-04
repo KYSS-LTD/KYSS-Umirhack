@@ -10,6 +10,9 @@
       <div class="col-md-4"><strong>Статус:</strong> {{ task.status.value }}</div>
       <div class="col-md-4"><strong>Агент:</strong> {{ task.agent.agent_uid if task.agent else '-' }}</div>
     </div>
+    <div class="alert {% if task_summary.level == 'CRIT' %}alert-danger{% elif task_summary.level == 'WARN' %}alert-warning{% else %}alert-success{% endif %}">
+      <strong>{{ task_summary.level }}</strong> — {{ task_summary.message }}
+    </div>
     <h2 class="h6">Полный результат</h2>
     <pre class="bg-light p-3 rounded" style="white-space: pre-wrap;">{{ task.result or '-' }}</pre>
     <h2 class="h6">Полные логи</h2>

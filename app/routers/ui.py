@@ -5,7 +5,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Form, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -56,6 +56,36 @@ def _get_ui_user_or_redirect(request: Request, db: Session) -> User | RedirectRe
         return response
     return user
 
+
+
+
+def _task_health_summary(task: Task) -> dict:
+    if not task:
+        return {'level': 'WARN', 'message': 'Нет данных'}
+    text = task.result or ''
+    try:
+        payload = json.loads(text) if text.strip().startswith('{') else {}
+    except Exception:
+        payload = {}
+    level = payload.get('level')
+    summary = payload.get('summary')
+    if level in {'OK', 'WARN', 'CRIT'}:
+        return {'level': level, 'message': summary or 'Диагностика завершена'}
+    if task.status.value == 'failed':
+        return {'level': 'CRIT', 'message': 'Задача завершилась ошибкой'}
+    if task.status.value == 'done':
+        return {'level': 'OK', 'message': 'Задача выполнена'}
+    return {'level': 'WARN', 'message': 'Задача в процессе'}
+
+
+def _build_topology(all_agents: list[Agent]) -> list[dict]:
+    topo = []
+    center_x, center_y, radius = 250, 180, 130
+    total = max(1, len(all_agents))
+    for idx, agent in enumerate(all_agents):
+        angle = 2 * math.pi * idx / total
+        topo.append({'uid': agent.agent_uid, 'name': agent.short_name, 'x': int(center_x + radius * math.cos(angle)), 'y': int(center_y + radius * math.sin(angle)), 'online': bool(agent.is_online and not agent.revoked)})
+    return topo
 
 def _require_permissions(request: Request, db: Session, need_view: bool = False, need_create: bool = False, need_admin: bool = False):
     current_user = _get_ui_user_or_redirect(request, db)
@@ -168,20 +198,7 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
     cutoff = datetime.utcnow() - timedelta(hours=24)
     offline_events_24h = sum(1 for e in recent_events if e.event_type == 'offline' and e.created_at >= cutoff)
 
-    topo = []
-    center_x, center_y, radius = 250, 180, 130
-    total = max(1, len(all_agents))
-    for idx, agent in enumerate(all_agents):
-        angle = 2 * math.pi * idx / total
-        topo.append(
-            {
-                'uid': agent.agent_uid,
-                'name': agent.short_name,
-                'x': int(center_x + radius * math.cos(angle)),
-                'y': int(center_y + radius * math.sin(angle)),
-                'online': bool(agent.is_online and not agent.revoked),
-            }
-        )
+    topo = _build_topology(all_agents)
 
     return templates.TemplateResponse(
         'dashboard.html',
@@ -200,12 +217,27 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
             },
             'chart_data_json': json.dumps({'taskStatus': {'labels': list(task_status_counter.keys()) or ['no-data'], 'values': list(task_status_counter.values()) or [0]}, 'taskTypes': {'labels': list(task_type_counter.keys()) or ['no-data'], 'values': list(task_type_counter.values()) or [0]}}, ensure_ascii=False),
             'topology_json': json.dumps(topo, ensure_ascii=False),
+            'allowed_types': sorted(settings.allowed_task_type_set),
             'current_user': current_user,
             'user_access': access,
         },
     )
 
 
+
+
+@router.get('/api/ui/topology')
+def topology_live(request: Request, db: Session = Depends(get_db)):
+    current_user, access = _require_permissions(request, db, need_view=True)
+    if isinstance(current_user, RedirectResponse):
+        return JSONResponse({'error': 'unauthorized'}, status_code=401)
+    if not access:
+        return JSONResponse({'error': 'forbidden'}, status_code=403)
+
+    mark_offline_agents(db, settings.agent_offline_seconds)
+    profiles_by_agent_id = _load_profiles(db)
+    all_agents = [_decorate_agent(a, profiles_by_agent_id.get(a.id)) for a in db.query(Agent).order_by(Agent.hostname.asc()).all()]
+    return {'generated_at': datetime.utcnow().isoformat(), 'nodes': _build_topology(all_agents)}
 @router.get('/tasks/detail/{task_uid}', response_class=HTMLResponse)
 def task_detail(task_uid: str, request: Request, db: Session = Depends(get_db)):
     current_user, access = _require_permissions(request, db, need_view=True)
@@ -214,7 +246,7 @@ def task_detail(task_uid: str, request: Request, db: Session = Depends(get_db)):
     if not access:
         return RedirectResponse(url='/', status_code=303)
     task = get_task_by_uid(db, task_uid)
-    return templates.TemplateResponse('task_detail.html', {'request': request, 'task': task, 'current_user': current_user, 'user_access': access})
+    return templates.TemplateResponse('task_detail.html', {'request': request, 'task': task, 'task_summary': _task_health_summary(task), 'current_user': current_user, 'user_access': access})
 
 
 @router.get('/agents/{agent_uid}', response_class=HTMLResponse)

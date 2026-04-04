@@ -54,8 +54,8 @@ def submit_result(
         raise HTTPException(status_code=404, detail='Задача не найдена')
 
     new_status = envelope.payload.get('status', 'failed')
-    task.logs = str(envelope.payload.get('logs', envelope.payload.get('result', '')))[:4000]
-    task.result = str(envelope.payload.get('result', ''))[:4000]
+    task.logs = str(envelope.payload.get('logs', envelope.payload.get('result', '')))[:8000]
+    task.result = str(envelope.payload.get('result', ''))[:8000]
     task.finished_at = datetime.utcnow()
 
     if new_status == 'done':
