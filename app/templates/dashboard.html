@@ -77,13 +77,13 @@
   <div class="col-12 col-xl-6">
     <div class="card p-3">
       <h2 class="h5 mb-3">Статусы задач (график)</h2>
-      <canvas id="taskStatusChart" height="180"></canvas>
+      <div class="chart-wrap"><canvas id="taskStatusChart"></canvas></div>
     </div>
   </div>
   <div class="col-12 col-xl-6">
     <div class="card p-3">
       <h2 class="h5 mb-3">Типы задач (график)</h2>
-      <canvas id="taskTypesChart" height="180"></canvas>
+      <div class="chart-wrap"><canvas id="taskTypesChart"></canvas></div>
     </div>
   </div>
 
@@ -179,7 +179,7 @@
         labels: data.taskStatus.labels,
         datasets: [{ data: data.taskStatus.values }]
       },
-      options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
     });
   }
 
@@ -193,6 +193,7 @@
       },
       options: {
         responsive: true,
+        maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: { y: { beginAtZero: true } }
       }
