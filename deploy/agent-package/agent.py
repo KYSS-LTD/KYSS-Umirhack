@@ -17,13 +17,13 @@ import httpx
 import nacl.encoding
 import nacl.signing
 
-CONFIG_DIR = Path.home() / '.agent'
+CONFIG_DIR = Path(os.getenv('AGENT_CONFIG_DIR', '/agent-data'))
 PRIVATE_KEY_PATH = CONFIG_DIR / 'private.key'
 PUBLIC_KEY_PATH = CONFIG_DIR / 'public.key'
 CONFIG_PATH = CONFIG_DIR / 'config.json'
 DEFAULT_INTERVAL = 5
-MIN_INTERVAL = 5
 MAX_INTERVAL = 10
+MIN_INTERVAL = 5
 MAX_BACKOFF_SECONDS = 60
 SAFE_EXEC_DIRS = {'/bin', '/usr/bin', '/usr/sbin', '/sbin'}
 
@@ -49,6 +49,7 @@ def configure_logging(level: str) -> None:
 def ensure_keys() -> tuple[str, str]:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if PRIVATE_KEY_PATH.exists() and PUBLIC_KEY_PATH.exists():
+        logger.debug('Using existing Ed25519 key pair from %s', CONFIG_DIR)
         return PRIVATE_KEY_PATH.read_text().strip(), PUBLIC_KEY_PATH.read_text().strip()
 
     signing_key = nacl.signing.SigningKey.generate()
@@ -210,7 +211,7 @@ def load_or_register(base_url: str, token: str, verify_tls: bool):
     private_key, _ = ensure_keys()
     if CONFIG_PATH.exists():
         cfg = json.loads(CONFIG_PATH.read_text())
-        logger.info('Loaded config for existing agent_uid=%s', cfg.get('agent_uid'))
+        logger.info('Loaded existing agent config from %s for agent_uid=%s', CONFIG_PATH, cfg.get('agent_uid'))
         return private_key, cfg
     private_key, cfg = register_with_retry(base_url, token, verify_tls)
     return private_key, cfg
@@ -226,7 +227,8 @@ def loop(base_url: str, agent_uid: str, agent_token: str, private_key: str, publ
     allowed = build_allowed_command_map(os.getenv('ALLOWED_COMMANDS', 'uptime,df -h,free -m'))
     headers = {'Authorization': f'Bearer {agent_token}'}
     sleep_time = max(MIN_INTERVAL, min(interval, MAX_INTERVAL))
-    logger.info('Agent loop started with interval=%s', sleep_time)
+    logger.info('Agent loop started. heartbeat_interval=%ss allowed_commands=%s', sleep_time, sorted(allowed))
+
     while True:
         hb_payload = {
             'hostname': platform.node(),
@@ -239,13 +241,16 @@ def loop(base_url: str, agent_uid: str, agent_token: str, private_key: str, publ
             with httpx.Client(timeout=10, verify=verify_tls, headers=headers) as client:
                 hb_response = client.post(f'{base_url}/api/agents/heartbeat', json=build_envelope(agent_uid, private_key, hb_payload))
                 ensure_status(hb_response, 'heartbeat')
-                task_resp = client.post(f'{base_url}/api/agents/tasks/next', json=build_envelope(agent_uid, private_key, hb_payload))
-                ensure_status(task_resp, 'tasks/next')
-                task = task_resp.json().get('task')
+                task_response = client.post(f'{base_url}/api/agents/tasks/next', json=build_envelope(agent_uid, private_key, hb_payload))
+                ensure_status(task_response, 'tasks/next')
+                task = task_response.json().get('task')
                 if task:
                     status, result, logs = run_task(task, allowed_commands=allowed)
                     task_payload = {'task_uid': task['task_uid'], 'status': status, 'result': result, 'logs': logs}
-                    result_response = client.post(f'{base_url}/api/tasks/result', json=build_envelope(agent_uid, private_key, task_payload))
+                    result_response = client.post(
+                        f'{base_url}/api/tasks/result',
+                        json=build_envelope(agent_uid, private_key, task_payload),
+                    )
                     ensure_status(result_response, 'tasks/result')
                     logger.info('Task completed task_uid=%s status=%s', task['task_uid'], status)
         except ReRegisterRequired as exc:
@@ -261,29 +266,37 @@ def str_to_bool(value: str) -> bool:
 
 def run_forever(base_url: str, registration_token: str, interval: int, verify_tls: bool):
     private_key, cfg = load_or_register(base_url, registration_token, verify_tls)
+
     while True:
         try:
             public = PUBLIC_KEY_PATH.read_text().strip()
             loop(base_url, cfg['agent_uid'], cfg['agent_token'], private_key, public, interval, verify_tls)
         except ReRegisterRequired as exc:
             old_uid = cfg.get('agent_uid')
-            logger.warning('Need re-register agent (%s). Refreshing credentials for agent_uid=%s', exc, old_uid)
+            logger.warning('Need re-register agent (%s). Trying to refresh credentials for agent_uid=%s', exc, old_uid)
             private_key, cfg = register_with_retry(base_url, registration_token, verify_tls, preferred_agent_uid=old_uid)
 
 
 def main():
     parser = argparse.ArgumentParser(description='KYSSCHECK Agent')
-    parser.add_argument('--base-url', required=True)
-    parser.add_argument('--registration-token', required=True)
-    parser.add_argument('--interval', type=int, default=DEFAULT_INTERVAL)
+    parser.add_argument('--base-url', default=os.getenv('BASE_URL'))
+    parser.add_argument('--registration-token', default=os.getenv('REGISTRATION_TOKEN'))
+    parser.add_argument('--interval', type=int, default=int(os.getenv('AGENT_INTERVAL', str(DEFAULT_INTERVAL))))
     parser.add_argument('--log-level', default=os.getenv('LOG_LEVEL', 'INFO'))
     parser.add_argument('--verify-tls', default=os.getenv('VERIFY_TLS', 'true'))
     args = parser.parse_args()
 
+    if not args.base_url or not args.registration_token:
+        raise SystemExit('BASE_URL and REGISTRATION_TOKEN are required (via args or env).')
+
     configure_logging(args.log_level)
     verify_tls = str_to_bool(args.verify_tls)
     if not verify_tls:
-        logger.warning('TLS verification is disabled via --verify-tls/VERIFY_TLS.')
+        logger.warning('TLS certificate verification is disabled (VERIFY_TLS=false). Use only for local debugging.')
+    if args.base_url.startswith('https://') and not verify_tls:
+        logger.info('HTTPS is used with VERIFY_TLS=false. For local dev only.')
+    if args.base_url.startswith('http://') and verify_tls:
+        logger.info('Base URL uses HTTP. TLS verification setting has no effect for plain HTTP.')
 
     run_forever(args.base_url, args.registration_token, args.interval, verify_tls)
 
