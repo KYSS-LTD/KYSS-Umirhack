@@ -203,8 +203,9 @@ class TelegramService:
                 if not agents:
                     await self.send_message(bot_token, chat_id, 'Нет зарегистрированных агентов.', message_thread_id=message_thread_id)
                     return
+                profiles = {p.agent_id: p.custom_name for p in db.query(AgentProfile).all() if p.custom_name}
                 keyboard = [
-                    [{'text': f'{a.hostname} ({a.agent_uid[:8]})', 'callback_data': f'pick_agent:{a.id}'}]
+                    [{'text': f'{profiles.get(a.id) or a.hostname} ({a.agent_uid[:8]})', 'callback_data': f'pick_agent:{a.id}'}]
                     for a in agents
                 ]
                 await self.send_message(
