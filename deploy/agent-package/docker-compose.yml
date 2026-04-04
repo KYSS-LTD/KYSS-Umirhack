@@ -1,7 +1,6 @@
 services:
   kyss-agent:
     build: .
-    container_name: kyss-agent
     restart: unless-stopped
     env_file:
       - .env
@@ -16,7 +15,4 @@ services:
     mem_limit: 256m
     cpus: "0.50"
     volumes:
-      - agent_data:/agent-data
-
-volumes:
-  agent_data:
+      - ./agent-data:/agent-data
