@@ -93,7 +93,12 @@ class TelegramService:
             cfg = self.get_or_create_config(db)
             if not (cfg.bot_token and cfg.chat_id and cfg.events_enabled):
                 return
-            await self.send_message(cfg.bot_token, cfg.chat_id, self._fmt_event(event_type, agent_uid, details))
+            await self.send_message(
+                cfg.bot_token,
+                cfg.chat_id,
+                self._fmt_event(event_type, agent_uid, details),
+                message_thread_id=cfg.events_thread_id,
+            )
         finally:
             db.close()
 
@@ -128,6 +133,7 @@ class TelegramService:
 
             if command == '/events_on':
                 cfg.chat_id = chat_id
+                cfg.events_thread_id = message_thread_id if isinstance(message_thread_id, int) else None
                 cfg.events_enabled = True
                 db.commit()
                 await self.send_message(bot_token, chat_id, 'Дублирование событий включено для этого чата.', message_thread_id=message_thread_id)
@@ -135,6 +141,7 @@ class TelegramService:
 
             if command == '/events_off':
                 cfg.events_enabled = False
+                cfg.events_thread_id = None
                 db.commit()
                 await self.send_message(bot_token, chat_id, 'Дублирование событий выключено.', message_thread_id=message_thread_id)
                 return

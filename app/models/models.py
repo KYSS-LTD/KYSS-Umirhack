@@ -111,5 +111,6 @@ class TelegramIntegrationSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     bot_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    events_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     events_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
