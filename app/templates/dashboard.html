@@ -163,7 +163,7 @@
           <tbody>
           {% for t in tasks %}
             <tr>
-              <td class="mono"><a href="/tasks/{{ t.task_uid }}">{{ t.task_uid }}</a></td>
+              <td class="mono"><a href="/tasks/detail/{{ t.task_uid }}">{{ t.task_uid }}</a></td>
               <td>{{ t.task_type }}</td>
               <td>{{ t.agent.agent_uid if t.agent else 'не назначен' }}</td>
               <td>{{ t.status.value }}</td>

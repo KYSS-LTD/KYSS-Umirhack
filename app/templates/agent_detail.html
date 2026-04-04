@@ -37,7 +37,7 @@
       <h2 class="h5 mb-3">Последние задачи агента</h2>
       <ul class="list-group list-group-flush">
         {% for t in tasks %}
-          <li class="list-group-item px-0"><a class="mono" href="/tasks/{{ t.task_uid }}">{{ t.task_uid }}</a> — {{ t.status.value }} — {{ (t.logs or t.result or '-')[:100] }}</li>
+          <li class="list-group-item px-0"><a class="mono" href="/tasks/detail/{{ t.task_uid }}">{{ t.task_uid }}</a> — {{ t.status.value }} — {{ (t.logs or t.result or '-')[:100] }}</li>
         {% else %}
           <li class="list-group-item px-0 text-secondary">Задач для агента пока нет.</li>
         {% endfor %}
