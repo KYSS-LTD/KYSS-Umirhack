@@ -2,17 +2,13 @@
 {% block title %}Новая задача — KYSSCHECK{% endblock %}
 {% block content %}
 <a class="btn btn-link ps-0" href="/">← Назад к панели</a>
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h1 class="h4 mb-0">Создать задачи</h1>
+  <a class="btn btn-outline-secondary btn-sm" href="/scenarios">Кастомные сценарии</a>
+</div>
 <div class="card p-4">
-  <h1 class="h4 mb-3">Создать задачу</h1>
-  <p class="text-secondary">Если выбрать <strong>«все агенты»</strong>, задача будет создана отдельно для каждого агента.</p>
+  <p class="text-secondary">Можно выбрать сразу несколько типов задач и/или готовые сценарии.</p>
   <form method="post" action="/tasks/new" class="row g-3">
-    <div class="col-12 col-md-6">
-      <label class="form-label">Тип задачи</label>
-      <select class="form-select" name="task_type">
-        {% for t in allowed_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
-      </select>
-    </div>
-
     <div class="col-12 col-md-6">
       <label class="form-label">Назначить агенту</label>
       <select class="form-select" name="agent_uid">
@@ -21,13 +17,39 @@
       </select>
     </div>
 
-    <div class="col-12">
-      <label class="form-label">Команда (только для run_command)</label>
+    <div class="col-12 col-md-6">
+      <label class="form-label">Команда для run_command</label>
       <input class="form-control" type="text" name="command" placeholder="например: uptime" />
     </div>
 
+    <div class="col-12 col-lg-6">
+      <label class="form-label">Типы задач (можно несколько)</label>
+      <div class="border rounded p-2" style="max-height: 180px; overflow-y: auto;">
+        {% for t in allowed_types %}
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="task_types" value="{{ t }}" id="task_{{ loop.index }}">
+            <label class="form-check-label" for="task_{{ loop.index }}">{{ t }}</label>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-6">
+      <label class="form-label">Кастомные сценарии</label>
+      <div class="border rounded p-2" style="max-height: 180px; overflow-y: auto;">
+        {% for s in scenarios %}
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="scenario_ids" value="{{ s.id }}" id="scenario_{{ s.id }}">
+            <label class="form-check-label" for="scenario_{{ s.id }}"><strong>{{ s.name }}</strong> — {{ s.task_type }}{% if s.command %} ({{ s.command }}){% endif %}</label>
+          </div>
+        {% else %}
+          <div class="text-secondary small">Сценариев пока нет.</div>
+        {% endfor %}
+      </div>
+    </div>
+
     <div class="col-12">
-      <button class="btn btn-primary" type="submit">Создать задачу</button>
+      <button class="btn btn-primary" type="submit">Запустить выбранные задачи</button>
     </div>
   </form>
 </div>

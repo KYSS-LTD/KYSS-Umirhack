@@ -28,6 +28,7 @@
         <span class="text-secondary small">{{ current_user.username }}</span>
         {% if user_access and (user_access.is_admin or user_access.can_create_tasks) %}
           <a class="btn btn-outline-primary btn-sm" href="/tasks/new">Новая задача</a>
+          <a class="btn btn-outline-info btn-sm" href="/scenarios">Сценарии</a>
         {% endif %}
         {% if user_access and user_access.is_admin %}
           <a class="btn btn-outline-secondary btn-sm" href="/admin/users">Права</a>
