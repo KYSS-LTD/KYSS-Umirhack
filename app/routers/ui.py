@@ -87,6 +87,19 @@ def _build_topology(all_agents: list[Agent]) -> list[dict]:
         topo.append({'uid': agent.agent_uid, 'name': agent.short_name, 'x': int(center_x + radius * math.cos(angle)), 'y': int(center_y + radius * math.sin(angle)), 'online': bool(agent.is_online and not agent.revoked)})
     return topo
 
+
+def _heartbeat_status(agent: Agent, now: datetime) -> dict:
+    if agent.revoked:
+        return {'level': 'CRIT', 'summary': 'revoked', 'age_sec': None}
+    if not agent.last_seen_at:
+        return {'level': 'CRIT', 'summary': 'нет heartbeat', 'age_sec': None}
+    age = int((now - agent.last_seen_at).total_seconds())
+    if agent.is_online and age <= settings.agent_offline_seconds:
+        return {'level': 'OK', 'summary': f'online ({age}s ago)', 'age_sec': age}
+    if age <= settings.agent_offline_seconds * 2:
+        return {'level': 'WARN', 'summary': f'stale heartbeat ({age}s ago)', 'age_sec': age}
+    return {'level': 'CRIT', 'summary': f'offline ({age}s ago)', 'age_sec': age}
+
 def _require_permissions(request: Request, db: Session, need_view: bool = False, need_create: bool = False, need_admin: bool = False):
     current_user = _get_ui_user_or_redirect(request, db)
     if isinstance(current_user, RedirectResponse):
@@ -199,6 +212,19 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
     offline_events_24h = sum(1 for e in recent_events if e.event_type == 'offline' and e.created_at >= cutoff)
 
     topo = _build_topology(all_agents)
+    now = datetime.utcnow()
+    heartbeat_rows = []
+    for a in all_agents:
+        hb = _heartbeat_status(a, now)
+        heartbeat_rows.append(
+            {
+                'agent_uid': a.agent_uid,
+                'display_name': a.display_name,
+                'level': hb['level'],
+                'summary': hb['summary'],
+                'last_seen_at': a.last_seen_at,
+            }
+        )
 
     return templates.TemplateResponse(
         'dashboard.html',
@@ -208,6 +234,7 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
             'all_agents': all_agents,
             'tasks': tasks,
             'events': recent_events,
+            'heartbeat_rows': heartbeat_rows,
             'filters': {'agent_uid': agent_uid, 'status': status, 'task_type': task_type},
             'metrics': {
                 'online_count': sum(1 for a in all_agents if a.is_online and not a.revoked),
