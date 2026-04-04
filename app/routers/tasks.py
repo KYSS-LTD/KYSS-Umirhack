@@ -1,4 +1,5 @@
 from datetime import datetime
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ from app.schemas.task import TaskCreateRequest
 from app.services.auth_services import get_current_user
 from app.services.rate_limit import limit_request
 from app.services.security_services import get_agent_and_validate_uid, get_agent_from_bearer, verify_agent_signature_if_present
+from app.services.telegram_service import telegram_service
 
 router = APIRouter(tags=['tasks'])
 settings = get_settings()
@@ -85,4 +87,27 @@ def submit_result(
         else:
             task.status = TaskStatus.failed
     db.commit()
+    if task.status in {TaskStatus.done, TaskStatus.failed}:
+        details_preview = (task.result or task.logs or '')[:500]
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(
+                telegram_service.notify_task_result(
+                    agent_uid=agent.agent_uid,
+                    task_uid=task.task_uid,
+                    task_type=task.task_type,
+                    status=task.status.value,
+                    details=details_preview,
+                )
+            )
+        except RuntimeError:
+            asyncio.run(
+                telegram_service.notify_task_result(
+                    agent_uid=agent.agent_uid,
+                    task_uid=task.task_uid,
+                    task_type=task.task_type,
+                    status=task.status.value,
+                    details=details_preview,
+                )
+            )
     return {'status': 'ok', 'task_status': task.status.value, 'retries': task.retries}

@@ -117,6 +117,33 @@ class TelegramService:
         finally:
             db.close()
 
+    async def notify_task_result(
+        self,
+        agent_uid: str,
+        task_uid: str,
+        task_type: str,
+        status: str,
+        details: str | None = None,
+    ) -> None:
+        db = SessionLocal()
+        try:
+            cfg = self.get_or_create_config(db)
+            if not (cfg.bot_token and cfg.chat_id and cfg.events_enabled):
+                return
+            icon = '✅' if status == 'done' else '❌'
+            details_text = f'\nРезультат: {details[:500]}' if details else ''
+            text = (
+                f'{icon} Проверка завершена\n'
+                f'Агент: {agent_uid}\n'
+                f'Task: {task_uid}\n'
+                f'Тип: {task_type}\n'
+                f'Статус: {status}'
+                f'{details_text}'
+            )
+            await self.send_message(cfg.bot_token, cfg.chat_id, text, message_thread_id=cfg.events_thread_id)
+        finally:
+            db.close()
+
     async def _handle_command(self, bot_token: str, message: dict) -> None:
         text = (message.get('text') or '').strip()
         chat = message.get('chat') or {}

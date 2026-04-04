@@ -121,6 +121,7 @@ python agent/agent.py --base-url https://your-domain-or-host --registration-toke
 - Команды бота:
   - `/run` — инлайн-меню: выбор агента и затем типа проверки;
   - `/events_on` и `/events_off` — включить/выключить дублирование событий в чат.
+- При включённом дублировании в чат отправляются: события `online/offline` и завершение проверок (`done/failed`).
 
 ## Поддерживаемые типы задач
 - `check_cpu`
