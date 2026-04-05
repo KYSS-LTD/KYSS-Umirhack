@@ -1,4 +1,5 @@
 import asyncio
+import html
 import uuid
 from datetime import datetime
 
@@ -59,6 +60,8 @@ class TelegramService:
             payload['message_thread_id'] = message_thread_id
         if reply_markup:
             payload['reply_markup'] = reply_markup
+        payload['disable_web_page_preview'] = True
+        payload['parse_mode'] = 'HTML'
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 response = await client.post(url, json=payload)
@@ -66,6 +69,30 @@ class TelegramService:
                 return bool(response.status_code == 200 and data.get('ok'))
         except Exception:
             return False
+
+    @staticmethod
+    def _main_menu_markup() -> dict:
+        return {
+            'inline_keyboard': [
+                [{'text': '🚀 Запустить проверку', 'callback_data': 'menu_run'}],
+                [{'text': '📶 Проба offline агентов', 'callback_data': 'menu_probe_offline'}],
+                [{'text': '🟢 Вкл события', 'callback_data': 'menu_events_on'}, {'text': '⚪ Выкл события', 'callback_data': 'menu_events_off'}],
+                [{'text': '🆔 Показать chat id', 'callback_data': 'menu_chatid'}],
+            ]
+        }
+
+    async def _send_main_menu(self, bot_token: str, chat_id: str, message_thread_id: int | None = None) -> None:
+        text = (
+            '🤖 <b>KYSSCHECK Bot</b>\n'
+            'Выберите действие ниже:'
+        )
+        await self.send_message(
+            bot_token,
+            chat_id,
+            text,
+            message_thread_id=message_thread_id,
+            reply_markup=self._main_menu_markup(),
+        )
 
     @staticmethod
     async def edit_message(
@@ -79,6 +106,7 @@ class TelegramService:
         payload = {'chat_id': chat_id, 'message_id': message_id, 'text': text}
         if reply_markup:
             payload['reply_markup'] = reply_markup
+        payload['parse_mode'] = 'HTML'
         async with httpx.AsyncClient(timeout=8.0) as client:
             await client.post(url, json=payload)
 
@@ -98,9 +126,9 @@ class TelegramService:
     @staticmethod
     def _fmt_event(event_type: str, agent_label: str, details: str | None) -> str:
         ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-        details_text = f' ({details})' if details else ''
+        details_text = f'\nℹ️ {html.escape(details)}' if details else ''
         icon = '🟢' if event_type == 'online' else '🔴' if event_type == 'offline' else 'ℹ️'
-        return f'{icon} [{ts}] Агент {agent_label}: {event_type}{details_text}'
+        return f'{icon} <b>{event_type.upper()}</b>\n👤 Агент: {html.escape(agent_label)}\n🕒 {ts}{details_text}'
 
     @staticmethod
     def _resolve_agent_label(db: Session, agent_uid: str) -> str:
@@ -140,13 +168,13 @@ class TelegramService:
             if not (cfg.bot_token and cfg.chat_id and cfg.events_enabled):
                 return
             icon = '✅' if status == 'done' else '❌'
-            details_text = f'\nРезультат: {details[:500]}' if details else ''
+            details_text = f'\n🧾 Результат: {html.escape(details[:500])}' if details else ''
             text = (
-                f'{icon} Проверка завершена\n'
-                f'Агент: {self._resolve_agent_label(db, agent_uid)}\n'
-                f'Task: {task_uid}\n'
-                f'Тип: {task_type}\n'
-                f'Статус: {status}'
+                f'{icon} <b>Проверка завершена</b>\n'
+                f'👤 Агент: {html.escape(self._resolve_agent_label(db, agent_uid))}\n'
+                f'🆔 Task: <code>{html.escape(task_uid)}</code>\n'
+                f'🧩 Тип: <code>{html.escape(task_type)}</code>\n'
+                f'📌 Статус: <b>{html.escape(status)}</b>'
                 f'{details_text}'
             )
             await self.send_message(cfg.bot_token, cfg.chat_id, text, message_thread_id=cfg.events_thread_id)
@@ -166,21 +194,20 @@ class TelegramService:
         try:
             cfg = self.get_or_create_config(db)
             if command == '/start':
-                intro = (
-                    'KYSSCHECK bot активен.\n'
-                    f'ID этого чата: {chat_id}\n'
-                    'Команды:\n'
-                    '/chatid - показать chat id\n'
-                    '/events_on - включить дублирование событий\n'
-                    '/events_off - выключить дублирование событий\n'
-                    '/run - запустить проверку через инлайн-меню\n'
-                    '/probe_offline - поставить heartbeat-пробу offline агентам'
+                await self.send_message(
+                    bot_token,
+                    chat_id,
+                    f'✅ Бот подключен.\n🆔 ID чата: <code>{chat_id}</code>',
+                    message_thread_id=message_thread_id,
                 )
-                await self.send_message(bot_token, chat_id, intro, message_thread_id=message_thread_id)
+                await self._send_main_menu(bot_token, chat_id, message_thread_id=message_thread_id)
+                return
+            if command == '/menu':
+                await self._send_main_menu(bot_token, chat_id, message_thread_id=message_thread_id)
                 return
 
             if command == '/chatid':
-                await self.send_message(bot_token, chat_id, f'ID этого чата: {chat_id}', message_thread_id=message_thread_id)
+                await self.send_message(bot_token, chat_id, f'🆔 ID этого чата: <code>{chat_id}</code>', message_thread_id=message_thread_id)
                 return
 
             if command == '/events_on':
@@ -188,30 +215,30 @@ class TelegramService:
                 cfg.events_thread_id = message_thread_id if isinstance(message_thread_id, int) else None
                 cfg.events_enabled = True
                 db.commit()
-                await self.send_message(bot_token, chat_id, 'Дублирование событий включено для этого чата.', message_thread_id=message_thread_id)
+                await self.send_message(bot_token, chat_id, '🟢 Дублирование событий включено для этого чата.', message_thread_id=message_thread_id)
                 return
 
             if command == '/events_off':
                 cfg.events_enabled = False
                 cfg.events_thread_id = None
                 db.commit()
-                await self.send_message(bot_token, chat_id, 'Дублирование событий выключено.', message_thread_id=message_thread_id)
+                await self.send_message(bot_token, chat_id, '⚪ Дублирование событий выключено.', message_thread_id=message_thread_id)
                 return
 
             if command == '/run':
                 agents = db.query(Agent).order_by(Agent.hostname.asc()).limit(20).all()
                 if not agents:
-                    await self.send_message(bot_token, chat_id, 'Нет зарегистрированных агентов.', message_thread_id=message_thread_id)
+                    await self.send_message(bot_token, chat_id, '😕 Нет зарегистрированных агентов.', message_thread_id=message_thread_id)
                     return
                 profiles = {p.agent_id: p.custom_name for p in db.query(AgentProfile).all() if p.custom_name}
                 keyboard = [
-                    [{'text': f'{profiles.get(a.id) or a.hostname} ({a.agent_uid[:8]})', 'callback_data': f'pick_agent:{a.id}'}]
+                    [{'text': f'🖥️ {profiles.get(a.id) or a.hostname} ({a.agent_uid[:8]})', 'callback_data': f'pick_agent:{a.id}'}]
                     for a in agents
                 ]
                 await self.send_message(
                     bot_token,
                     chat_id,
-                    'Выберите агента:',
+                    '👇 Выберите агента:',
                     message_thread_id=message_thread_id,
                     reply_markup={'inline_keyboard': keyboard},
                 )
@@ -220,7 +247,7 @@ class TelegramService:
             if command == '/probe_offline':
                 offline_agents = db.query(Agent).filter((Agent.is_online.is_(False)) | (Agent.revoked.is_(True))).all()
                 if not offline_agents:
-                    await self.send_message(bot_token, chat_id, 'Сейчас offline-агентов нет.', message_thread_id=message_thread_id)
+                    await self.send_message(bot_token, chat_id, '✅ Сейчас offline-агентов нет.', message_thread_id=message_thread_id)
                     return
                 task_type = 'check_system_info' if 'check_system_info' in settings.allowed_task_type_set else sorted(settings.allowed_task_type_set)[0]
                 created = 0
@@ -231,7 +258,8 @@ class TelegramService:
                 await self.send_message(
                     bot_token,
                     chat_id,
-                    f'Поставил heartbeat-пробу для {created} offline агентов. Как только они включатся и пришлют heartbeat, задачи выполнятся.',
+                    f'📶 Поставил heartbeat-пробу для <b>{created}</b> offline агентов.\n'
+                    'Как только они включатся и пришлют heartbeat, задачи выполнятся.',
                     message_thread_id=message_thread_id,
                 )
                 return
@@ -251,6 +279,21 @@ class TelegramService:
 
         db = SessionLocal()
         try:
+            if data == 'menu_run':
+                await self._handle_command(bot_token, {'text': '/run', 'chat': {'id': chat_id}, 'message_thread_id': message.get('message_thread_id')})
+                return
+            if data == 'menu_probe_offline':
+                await self._handle_command(bot_token, {'text': '/probe_offline', 'chat': {'id': chat_id}, 'message_thread_id': message.get('message_thread_id')})
+                return
+            if data == 'menu_events_on':
+                await self._handle_command(bot_token, {'text': '/events_on', 'chat': {'id': chat_id}, 'message_thread_id': message.get('message_thread_id')})
+                return
+            if data == 'menu_events_off':
+                await self._handle_command(bot_token, {'text': '/events_off', 'chat': {'id': chat_id}, 'message_thread_id': message.get('message_thread_id')})
+                return
+            if data == 'menu_chatid':
+                await self._handle_command(bot_token, {'text': '/chatid', 'chat': {'id': chat_id}, 'message_thread_id': message.get('message_thread_id')})
+                return
             if data.startswith('pick_agent:'):
                 agent_id = int(data.split(':', 1)[1])
                 agent = db.query(Agent).filter(Agent.id == agent_id).first()
@@ -264,7 +307,7 @@ class TelegramService:
                     bot_token,
                     chat_id,
                     message_id,
-                    f'Агент: {agent.hostname} ({agent.agent_uid}). Выберите задачу:',
+                    f'🖥️ Агент: {agent.hostname} ({agent.agent_uid})\nВыберите задачу:',
                     reply_markup={'inline_keyboard': keyboard[:20]},
                 )
                 return
@@ -276,7 +319,7 @@ class TelegramService:
                     return
                 db.add(Task(task_uid=uuid.uuid4().hex, task_type=task_type, command=None, status=TaskStatus.pending, agent_id=agent.id))
                 db.commit()
-                await self.edit_message(bot_token, chat_id, message_id, f'✅ Запущена задача {task_type} для {agent.hostname} ({agent.agent_uid}).')
+                await self.edit_message(bot_token, chat_id, message_id, f'✅ Запущена задача <code>{task_type}</code> для {agent.hostname} ({agent.agent_uid}).')
         finally:
             db.close()
 

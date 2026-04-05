@@ -198,6 +198,12 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
     task_status_counter = Counter(t.status.value for t in tasks)
 
     recent_events = list_recent_agent_events(db, limit=120)
+    for event in recent_events:
+        if event.agent:
+            custom_name = profiles_by_agent_id.get(event.agent.id)
+            event.agent_display = custom_name or event.agent.hostname  # type: ignore[attr-defined]
+        else:
+            event.agent_display = '-'  # type: ignore[attr-defined]
     cutoff = datetime.utcnow() - timedelta(hours=24)
     offline_events_24h = sum(1 for e in recent_events if e.event_type == 'offline' and e.created_at >= cutoff)
 

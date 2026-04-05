@@ -146,7 +146,7 @@
               {% else %}
                 <span class="badge text-bg-secondary">{{ e.event_type }}</span>
               {% endif %}
-              <span class="ms-1">{{ e.agent.agent_uid if e.agent else '-' }}</span>
+              <span class="ms-1">{{ e.agent_display if e.agent_display else '-' }}{% if e.agent %} <span class="text-secondary">({{ e.agent.agent_uid }})</span>{% endif %}</span>
             </div>
             <div class="text-secondary">{{ e.created_at }}</div>
           </div>
