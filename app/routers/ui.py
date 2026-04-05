@@ -2,11 +2,8 @@ import json
 import math
 import uuid
 import asyncio
-<<<<<<< HEAD
-=======
 import csv
 import io
->>>>>>> d576a5f4df7dd8c50a7abf7a0a1e89350c11d38d
 from collections import Counter
 from datetime import datetime, timedelta
 

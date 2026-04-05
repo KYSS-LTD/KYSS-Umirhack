@@ -1,9 +1,7 @@
 from datetime import datetime
 import asyncio
-<<<<<<< HEAD
-=======
 import difflib
->>>>>>> d576a5f4df7dd8c50a7abf7a0a1e89350c11d38d
+
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.orm import Session
