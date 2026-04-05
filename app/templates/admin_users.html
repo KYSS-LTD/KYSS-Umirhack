@@ -6,13 +6,21 @@
   <h1 class="h4 mb-3">Управление правами пользователей</h1>
   <div class="table-responsive">
     <table class="table align-middle">
-      <thead><tr><th>ID</th><th>Пользователь</th><th>Админ</th><th>Просмотр агентов</th><th>Создание задач</th><th></th></tr></thead>
+      <thead><tr><th>ID</th><th>Пользователь</th><th>Роль (preset)</th><th>Админ</th><th>Просмотр агентов</th><th>Создание задач</th><th></th></tr></thead>
       <tbody>
       {% for user, access in rows %}
         <tr>
           <form method="post" action="/admin/users/{{ user.id }}/access">
             <td>{{ user.id }}</td>
             <td>{{ user.username }}</td>
+            <td>
+              <select class="form-select form-select-sm" name="role">
+                <option value="custom">custom</option>
+                <option value="observer">observer</option>
+                <option value="operator">operator</option>
+                <option value="administrator">administrator</option>
+              </select>
+            </td>
             <td><input class="form-check-input" type="checkbox" name="is_admin" {% if access.is_admin %}checked{% endif %}></td>
             <td><input class="form-check-input" type="checkbox" name="can_view_agents" {% if access.can_view_agents %}checked{% endif %}></td>
             <td><input class="form-check-input" type="checkbox" name="can_create_tasks" {% if access.can_create_tasks %}checked{% endif %}></td>

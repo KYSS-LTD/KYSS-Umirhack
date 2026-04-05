@@ -24,7 +24,11 @@
       <input class="form-control" type="text" name="custom_name" value="{{ agent.display_name }}" maxlength="120" placeholder="Например: PROD-EU-1" />
       <div class="form-text">Alias отображается в UI и не влияет на технический `agent_uid`.</div>
     </div>
-    <div class="col-12 col-md-4 d-flex align-items-end">
+    <div class="col-12 col-md-4">
+      <label class="form-label">Группа/сегмент</label>
+      <input class="form-control" type="text" name="group_name" value="{{ profile.group_name if profile else '' }}" maxlength="80" placeholder="dc1 / prod / vlan-10" />
+    </div>
+    <div class="col-12 d-flex align-items-end">
       <button class="btn btn-outline-primary w-100" type="submit">Сохранить имя</button>
     </div>
   </form>

@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta
+import asyncio
 
 from sqlalchemy.orm import Session
 
 from app.models.models import Agent, AgentEvent, AgentProfile, Task, TaskStatus, User, UserAccess
+from app.services.telegram_service import telegram_service
 
 
 EVENT_ONLINE = 'online'
@@ -105,7 +107,24 @@ def get_agent_by_token(db: Session, token: str) -> Agent | None:
 
 
 def add_agent_event(db: Session, agent: Agent, event_type: str, details: str | None = None) -> None:
+    recent_duplicate = (
+        db.query(AgentEvent)
+        .filter(
+            AgentEvent.agent_id == agent.id,
+            AgentEvent.event_type == event_type,
+            AgentEvent.created_at >= datetime.utcnow() - timedelta(seconds=90),
+        )
+        .order_by(AgentEvent.created_at.desc())
+        .first()
+    )
+    if recent_duplicate:
+        return
     db.add(AgentEvent(agent_id=agent.id, event_type=event_type, details=details))
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(telegram_service.notify_agent_event(agent.agent_uid, event_type, details))
+    except RuntimeError:
+        asyncio.run(telegram_service.notify_agent_event(agent.agent_uid, event_type, details))
 
 
 def touch_agent(db: Session, agent: Agent, payload: dict | None = None) -> None:
@@ -151,7 +170,15 @@ def create_task(db: Session, task_uid: str, task_type: str, command: str | None,
     return task
 
 
-def get_next_task_for_agent(db: Session, agent: Agent) -> Task | None:
+def get_next_task_for_agent(db: Session, agent: Agent, max_parallel_tasks: int = 1) -> Task | None:
+    if max_parallel_tasks > 0:
+        running_count = (
+            db.query(Task)
+            .filter(Task.agent_id == agent.id, Task.status == TaskStatus.running)
+            .count()
+        )
+        if running_count >= max_parallel_tasks:
+            return None
     task = (
         db.query(Task)
         .filter(Task.status == TaskStatus.pending)
