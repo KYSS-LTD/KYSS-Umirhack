@@ -70,7 +70,16 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-12 col-md-2 d-grid">
+    <div class="col-6 col-md-2">
+      <label class="form-label mb-1">Группа</label>
+      <select class="form-select" name="group">
+        <option value="all" {% if filters.group == 'all' %}selected{% endif %}>все</option>
+        {% for g in groups %}
+          <option value="{{ g }}" {% if filters.group == g %}selected{% endif %}>{{ g }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-12 d-grid">
       <button class="btn btn-outline-primary" type="submit">Применить</button>
     </div>
   </form>
@@ -146,7 +155,7 @@
               {% else %}
                 <span class="badge text-bg-secondary">{{ e.event_type }}</span>
               {% endif %}
-              <span class="ms-1">{{ e.agent.agent_uid if e.agent else '-' }}</span>
+              <span class="ms-1">{{ e.agent_display if e.agent_display else '-' }}{% if e.agent %} <span class="text-secondary">({{ e.agent.agent_uid }})</span>{% endif %}</span>
             </div>
             <div class="text-secondary">{{ e.created_at }}</div>
           </div>
@@ -174,6 +183,31 @@
             </tr>
           {% else %}
             <tr><td colspan="5" class="text-secondary">Задач пока нет.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card p-3">
+      <h2 class="h5 mb-3">Рейтинг агентов (стабильность и скорость)</h2>
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead><tr><th>Агент</th><th>Запусков за 24ч</th><th>Ошибок за 24ч</th><th>Среднее время (с)</th><th>Стабильность %</th><th>Score</th></tr></thead>
+          <tbody>
+          {% for r in agent_ranking %}
+            <tr>
+              <td>{{ r.agent_name }}<div class="small text-secondary mono">{{ r.agent_uid }}</div></td>
+              <td>{{ r.runs_24h }}</td>
+              <td>{{ r.errors_24h }}</td>
+              <td>{{ r.avg_duration }}</td>
+              <td>{{ r.stability }}</td>
+              <td><strong>{{ r.score }}</strong></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="text-secondary">Недостаточно данных для рейтинга.</td></tr>
           {% endfor %}
           </tbody>
         </table>

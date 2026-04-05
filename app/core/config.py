@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     enforce_https: bool = True
     agent_offline_seconds: int = 25
     task_execution_timeout_seconds: int = 30
+    offline_probe_interval_seconds: int = 60
+    offline_probe_cooldown_seconds: int = 300
+    agent_max_parallel_tasks: int = 1
+    integration_api_key: str = ''
 
     @property
     def allowed_command_set(self) -> set[str]:

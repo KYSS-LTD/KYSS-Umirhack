@@ -1,18 +1,24 @@
 import json
 import math
 import uuid
+import asyncio
+import csv
+import io
 from collections import Counter
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Form, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect, text
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.database import engine
 from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
 from app.models.models import Agent, AgentEvent, AgentProfile, Task, TaskScenario, TaskStatus, User
+from app.services.telegram_service import telegram_service
 from app.repositories.repositories import (
     create_task,
     create_user,
@@ -36,8 +42,25 @@ def _decorate_agent(agent: Agent, custom_name: str | None) -> Agent:
 
 
 def _load_profiles(db: Session) -> dict[int, str]:
+    _ensure_agent_profile_schema()
     profiles = db.query(AgentProfile).all()
     return {p.agent_id: p.custom_name for p in profiles if p.custom_name}
+
+
+def _load_profile_groups(db: Session) -> dict[int, str]:
+    _ensure_agent_profile_schema()
+    profiles = db.query(AgentProfile).all()
+    return {p.agent_id: p.group_name for p in profiles if p.group_name}
+
+
+def _ensure_agent_profile_schema() -> None:
+    insp = inspect(engine)
+    if 'agent_profiles' not in insp.get_table_names():
+        return
+    cols = {c['name'] for c in insp.get_columns('agent_profiles')}
+    if 'group_name' not in cols:
+        with engine.begin() as conn:
+            conn.execute(text('ALTER TABLE agent_profiles ADD COLUMN group_name VARCHAR(80)'))
 
 
 def _get_ui_user_or_redirect(request: Request, db: Session) -> User | RedirectResponse:
@@ -163,7 +186,7 @@ def logout():
 
 
 @router.get('/', response_class=HTMLResponse)
-def dashboard(request: Request, agent_uid: str = Query(default=''), status: str = Query(default='all'), task_type: str = Query(default='all'), db: Session = Depends(get_db)):
+def dashboard(request: Request, agent_uid: str = Query(default=''), status: str = Query(default='all'), task_type: str = Query(default='all'), group: str = Query(default='all'), db: Session = Depends(get_db)):
     current_user, access = _require_permissions(request, db, need_view=True)
     if isinstance(current_user, RedirectResponse):
         return current_user
@@ -181,8 +204,13 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
         agents_query = agents_query.filter((Agent.is_online.is_(False)) | (Agent.revoked.is_(True)))
 
     profiles_by_agent_id = _load_profiles(db)
+    groups_by_agent_id = _load_profile_groups(db)
     agents = [_decorate_agent(a, profiles_by_agent_id.get(a.id)) for a in agents_query.order_by(Agent.last_seen_at.desc()).all()]
     all_agents = [_decorate_agent(a, profiles_by_agent_id.get(a.id)) for a in db.query(Agent).order_by(Agent.hostname.asc()).all()]
+    for a in all_agents:
+        a.group_name = groups_by_agent_id.get(a.id)  # type: ignore[attr-defined]
+    if group != 'all':
+        agents = [a for a in agents if groups_by_agent_id.get(a.id, 'ungrouped') == group]
 
     tasks_query = db.query(Task)
     if agent_uid:
@@ -196,10 +224,42 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
     task_status_counter = Counter(t.status.value for t in tasks)
 
     recent_events = list_recent_agent_events(db, limit=120)
+    for event in recent_events:
+        if event.agent:
+            custom_name = profiles_by_agent_id.get(event.agent.id)
+            event.agent_display = custom_name or event.agent.hostname  # type: ignore[attr-defined]
+        else:
+            event.agent_display = '-'  # type: ignore[attr-defined]
     cutoff = datetime.utcnow() - timedelta(hours=24)
     offline_events_24h = sum(1 for e in recent_events if e.event_type == 'offline' and e.created_at >= cutoff)
 
     topo = _build_topology(all_agents)
+
+    day_cutoff = datetime.utcnow() - timedelta(days=1)
+    ranking = []
+    for agent in all_agents:
+        agent_tasks = db.query(Task).filter(Task.agent_id == agent.id).all()
+        completed = [t for t in agent_tasks if t.finished_at and t.started_at and t.status in {TaskStatus.done, TaskStatus.failed}]
+        runs_24h = [t for t in completed if t.finished_at and t.finished_at >= day_cutoff]
+        avg_duration = sum((t.finished_at - t.started_at).total_seconds() for t in completed) / len(completed) if completed else 0.0
+        errors_24h = sum(1 for t in runs_24h if t.status == TaskStatus.failed)
+        stability = 100.0
+        if runs_24h:
+            stability = max(0.0, 100.0 - (errors_24h / max(1, len(runs_24h))) * 100.0)
+        speed_score = max(0.0, 100.0 - min(100.0, avg_duration))
+        score = round(stability * 0.7 + speed_score * 0.3, 2)
+        ranking.append(
+            {
+                'agent_uid': agent.agent_uid,
+                'agent_name': agent.display_name,
+                'runs_24h': len(runs_24h),
+                'avg_duration': round(avg_duration, 2),
+                'errors_24h': errors_24h,
+                'stability': round(stability, 2),
+                'score': score,
+            }
+        )
+    ranking.sort(key=lambda x: x['score'], reverse=True)
     return templates.TemplateResponse(
         'dashboard.html',
         {
@@ -208,7 +268,8 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
             'all_agents': all_agents,
             'tasks': tasks,
             'events': recent_events,
-            'filters': {'agent_uid': agent_uid, 'status': status, 'task_type': task_type},
+            'filters': {'agent_uid': agent_uid, 'status': status, 'task_type': task_type, 'group': group},
+            'groups': sorted({v for v in groups_by_agent_id.values()}),
             'metrics': {
                 'online_count': sum(1 for a in all_agents if a.is_online and not a.revoked),
                 'offline_count': sum(1 for a in all_agents if not a.is_online or a.revoked),
@@ -217,6 +278,7 @@ def dashboard(request: Request, agent_uid: str = Query(default=''), status: str 
             },
             'chart_data_json': json.dumps({'taskStatus': {'labels': list(task_status_counter.keys()) or ['no-data'], 'values': list(task_status_counter.values()) or [0]}, 'taskTypes': {'labels': list(task_type_counter.keys()) or ['no-data'], 'values': list(task_type_counter.values()) or [0]}}, ensure_ascii=False),
             'topology_json': json.dumps(topo, ensure_ascii=False),
+            'agent_ranking': ranking[:20],
             'allowed_types': sorted(settings.allowed_task_type_set),
             'current_user': current_user,
             'user_access': access,
@@ -257,6 +319,105 @@ def topology_live(request: Request, db: Session = Depends(get_db)):
         if t.agent is not None
     ]
     return {'generated_at': datetime.utcnow().isoformat(), 'nodes': _build_topology(all_agents), 'task_signals': task_signals}
+
+
+@router.get('/api/metrics/agents')
+def agents_metrics(request: Request, db: Session = Depends(get_db)):
+    current_user, access = _require_permissions(request, db, need_view=True)
+    if isinstance(current_user, RedirectResponse):
+        return JSONResponse({'error': 'unauthorized'}, status_code=401)
+    if not access:
+        return JSONResponse({'error': 'forbidden'}, status_code=403)
+    day_cutoff = datetime.utcnow() - timedelta(days=1)
+    rows = []
+    for agent in db.query(Agent).all():
+        tasks = db.query(Task).filter(Task.agent_id == agent.id).all()
+        completed = [t for t in tasks if t.finished_at and t.started_at and t.status in {TaskStatus.done, TaskStatus.failed}]
+        runs_24h = [t for t in completed if t.finished_at and t.finished_at >= day_cutoff]
+        avg_duration = sum((t.finished_at - t.started_at).total_seconds() for t in completed) / len(completed) if completed else 0.0
+        errors_24h = sum(1 for t in runs_24h if t.status == TaskStatus.failed)
+        rows.append(
+            {
+                'agent_uid': agent.agent_uid,
+                'runs_24h': len(runs_24h),
+                'avg_duration_seconds': round(avg_duration, 2),
+                'errors_24h': errors_24h,
+            }
+        )
+    return {'generated_at': datetime.utcnow().isoformat(), 'items': rows}
+
+
+@router.get('/api/tasks/export')
+def export_tasks(request: Request, format: str = Query(default='json'), limit: int = Query(default=500, ge=1, le=5000), db: Session = Depends(get_db)):
+    current_user, access = _require_permissions(request, db, need_view=True)
+    if isinstance(current_user, RedirectResponse):
+        return JSONResponse({'error': 'unauthorized'}, status_code=401)
+    if not access:
+        return JSONResponse({'error': 'forbidden'}, status_code=403)
+
+    tasks = db.query(Task).order_by(Task.created_at.desc()).limit(limit).all()
+    rows = [
+        {
+            'task_uid': t.task_uid,
+            'task_type': t.task_type,
+            'status': t.status.value,
+            'agent_uid': t.agent.agent_uid if t.agent else None,
+            'created_at': t.created_at.isoformat() if t.created_at else None,
+            'started_at': t.started_at.isoformat() if t.started_at else None,
+            'finished_at': t.finished_at.isoformat() if t.finished_at else None,
+            'result': (t.result or '')[:2000],
+            'logs': (t.logs or '')[:2000],
+        }
+        for t in tasks
+    ]
+    if format == 'csv':
+        buff = io.StringIO()
+        writer = csv.DictWriter(buff, fieldnames=list(rows[0].keys()) if rows else ['task_uid', 'task_type', 'status', 'agent_uid', 'created_at', 'started_at', 'finished_at', 'result', 'logs'])
+        writer.writeheader()
+        writer.writerows(rows)
+        return Response(
+            content=buff.getvalue(),
+            media_type='text/csv; charset=utf-8',
+            headers={'Content-Disposition': 'attachment; filename=tasks_export.csv'},
+        )
+    if format == 'pdf':
+        lines = ['KYSSCHECK Tasks Export', '']
+        for row in rows[:200]:
+            lines.append(f"{row['task_uid']} | {row['task_type']} | {row['status']} | {row['agent_uid'] or '-'}")
+        pdf_bytes = _simple_text_pdf(lines)
+        return Response(
+            content=pdf_bytes,
+            media_type='application/pdf',
+            headers={'Content-Disposition': 'attachment; filename=tasks_export.pdf'},
+        )
+    return JSONResponse(content={'count': len(rows), 'items': rows})
+
+
+def _simple_text_pdf(lines: list[str]) -> bytes:
+    safe_lines = [(line or '').replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')[:140] for line in lines]
+    text_stream = 'BT /F1 10 Tf 40 800 Td 12 TL ' + ' '.join(f'({line}) Tj T*' for line in safe_lines[:500]) + ' ET'
+    stream_bytes = text_stream.encode('latin-1', errors='ignore')
+    parts = []
+    offsets = []
+
+    def add_obj(obj: str):
+        offsets.append(sum(len(p) for p in parts))
+        parts.append(obj.encode('latin-1'))
+
+    parts.append(b'%PDF-1.4\n')
+    add_obj('1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n')
+    add_obj('2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n')
+    add_obj('3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n')
+    add_obj(f'4 0 obj << /Length {len(stream_bytes)} >> stream\n{text_stream}\nendstream endobj\n')
+    add_obj('5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Courier >> endobj\n')
+    xref_offset = sum(len(p) for p in parts)
+    xref = ['xref\n0 6\n0000000000 65535 f \n']
+    for off in offsets:
+        xref.append(f'{off:010d} 00000 n \n')
+    trailer = f"trailer << /Size 6 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n"
+    parts.append(''.join(xref).encode('latin-1'))
+    parts.append(trailer.encode('latin-1'))
+    return b''.join(parts)
 @router.get('/tasks/detail/{task_uid}', response_class=HTMLResponse)
 def task_detail(task_uid: str, request: Request, db: Session = Depends(get_db)):
     current_user, access = _require_permissions(request, db, need_view=True)
@@ -282,11 +443,11 @@ def agent_detail(agent_uid: str, request: Request, db: Session = Depends(get_db)
         _decorate_agent(agent, profile.custom_name if profile else None)
     tasks = db.query(Task).filter(Task.agent_id == agent.id).order_by(Task.created_at.desc()).limit(50).all() if agent else []
     events = db.query(AgentEvent).filter(AgentEvent.agent_id == agent.id).order_by(AgentEvent.created_at.desc()).limit(30).all() if agent else []
-    return templates.TemplateResponse('agent_detail.html', {'request': request, 'agent': agent, 'tasks': tasks, 'events': events, 'current_user': current_user, 'user_access': access})
+    return templates.TemplateResponse('agent_detail.html', {'request': request, 'agent': agent, 'profile': profile, 'tasks': tasks, 'events': events, 'current_user': current_user, 'user_access': access})
 
 
 @router.post('/agents/{agent_uid}/rename')
-def rename_agent(agent_uid: str, request: Request, custom_name: str = Form(''), db: Session = Depends(get_db)):
+def rename_agent(agent_uid: str, request: Request, custom_name: str = Form(''), group_name: str = Form(''), db: Session = Depends(get_db)):
     current_user, access = _require_permissions(request, db, need_view=True)
     if isinstance(current_user, RedirectResponse):
         return current_user
@@ -298,6 +459,7 @@ def rename_agent(agent_uid: str, request: Request, custom_name: str = Form(''), 
     profile = db.query(AgentProfile).filter(AgentProfile.agent_id == agent.id).first() or AgentProfile(agent_id=agent.id)
     db.add(profile)
     profile.custom_name = custom_name.strip()[:120] or None
+    profile.group_name = group_name.strip()[:80] or None
     db.commit()
     return RedirectResponse(url=f'/agents/{agent_uid}', status_code=303)
 
@@ -341,7 +503,7 @@ def admin_users(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post('/admin/users/{user_id}/access')
-def update_user_access(user_id: int, request: Request, can_view_agents: str = Form('off'), can_create_tasks: str = Form('off'), is_admin: str = Form('off'), db: Session = Depends(get_db)):
+def update_user_access(user_id: int, request: Request, can_view_agents: str = Form('off'), can_create_tasks: str = Form('off'), is_admin: str = Form('off'), role: str = Form('custom'), db: Session = Depends(get_db)):
     current_user, access = _require_permissions(request, db, need_admin=True)
     if isinstance(current_user, RedirectResponse):
         return current_user
@@ -351,9 +513,22 @@ def update_user_access(user_id: int, request: Request, can_view_agents: str = Fo
     if not user:
         return RedirectResponse(url='/admin/users', status_code=303)
     ua = ensure_user_access(db, user)
-    ua.is_admin = is_admin == 'on'
-    ua.can_view_agents = can_view_agents == 'on' or ua.is_admin
-    ua.can_create_tasks = can_create_tasks == 'on' or ua.is_admin
+    if role == 'observer':
+        ua.is_admin = False
+        ua.can_view_agents = True
+        ua.can_create_tasks = False
+    elif role == 'operator':
+        ua.is_admin = False
+        ua.can_view_agents = True
+        ua.can_create_tasks = True
+    elif role == 'administrator':
+        ua.is_admin = True
+        ua.can_view_agents = True
+        ua.can_create_tasks = True
+    else:
+        ua.is_admin = is_admin == 'on'
+        ua.can_view_agents = can_view_agents == 'on' or ua.is_admin
+        ua.can_create_tasks = can_create_tasks == 'on' or ua.is_admin
     db.commit()
     return RedirectResponse(url='/admin/users', status_code=303)
 
@@ -439,3 +614,44 @@ def create_task_form(
             create_task(db, task_uid=uuid.uuid4().hex, task_type=task_type, command=cmd, agent_id=agent.id)
 
     return RedirectResponse(url='/', status_code=303)
+
+
+@router.get('/settings/telegram', response_class=HTMLResponse)
+def telegram_settings_page(request: Request, db: Session = Depends(get_db)):
+    current_user, access = _require_permissions(request, db, need_admin=True)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
+    cfg = telegram_service.get_or_create_config(db)
+    return templates.TemplateResponse('telegram_settings.html', {'request': request, 'cfg': cfg, 'current_user': current_user, 'user_access': access})
+
+
+@router.post('/settings/telegram')
+def telegram_settings_save(
+    request: Request,
+    bot_token: str = Form(''),
+    chat_id: str = Form(''),
+    events_thread_id: str = Form(''),
+    events_enabled: str = Form('off'),
+    db: Session = Depends(get_db),
+):
+    current_user, access = _require_permissions(request, db, need_admin=True)
+    if isinstance(current_user, RedirectResponse):
+        return current_user
+    if not access:
+        return RedirectResponse(url='/', status_code=303)
+    cfg = telegram_service.get_or_create_config(db)
+    cfg.bot_token = bot_token.strip()[:255] or None
+    cfg.chat_id = chat_id.strip()[:64] or None
+    cfg.events_thread_id = int(events_thread_id.strip()) if events_thread_id.strip().lstrip('-').isdigit() else None
+    cfg.events_enabled = events_enabled == 'on'
+    db.commit()
+    telegram_service.reload_config()
+    if cfg.bot_token and cfg.chat_id:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(telegram_service.send_config_saved_message(cfg.bot_token, cfg.chat_id))
+        except RuntimeError:
+            asyncio.run(telegram_service.send_config_saved_message(cfg.bot_token, cfg.chat_id))
+    return RedirectResponse(url='/settings/telegram', status_code=303)

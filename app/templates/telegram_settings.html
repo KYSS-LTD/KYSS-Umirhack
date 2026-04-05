@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Telegram — KYSSCHECK{% endblock %}
+{% block content %}
+<div class="card p-3">
+  <h1 class="h4 mb-2">Интеграция Telegram</h1>
+  <p class="text-secondary">Опционально: укажите токен бота и chat id группы. Бот также умеет показывать ID чата и запускать проверки.</p>
+
+  <form method="post" action="/settings/telegram" class="row g-3">
+    <div class="col-12">
+      <label class="form-label">Bot token</label>
+      <input type="text" name="bot_token" class="form-control mono" value="{{ cfg.bot_token or '' }}" placeholder="123456:ABC..." />
+      <div class="form-text">После сохранения бот начнёт опрашивать Telegram.</div>
+    </div>
+    <div class="col-12 col-md-6">
+      <label class="form-label">Chat ID группы</label>
+      <input type="text" name="chat_id" class="form-control mono" value="{{ cfg.chat_id or '' }}" placeholder="-1001234567890" />
+    </div>
+    <div class="col-12 col-md-6">
+      <label class="form-label">Thread ID (опционально)</label>
+      <input type="text" name="events_thread_id" class="form-control mono" value="{{ cfg.events_thread_id if cfg.events_thread_id is not none else '' }}" placeholder="Для forum topics" />
+      <div class="form-text">Если группа с топиками — укажите topic thread id или включите через /events_on прямо в нужном топике.</div>
+    </div>
+    <div class="col-12 col-md-6 d-flex align-items-end">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" name="events_enabled" id="eventsEnabled" {% if cfg.events_enabled %}checked{% endif %}>
+        <label class="form-check-label" for="eventsEnabled">Дублировать online/offline события в чат</label>
+      </div>
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Сохранить</button>
+    </div>
+  </form>
+
+  <hr>
+  <h2 class="h6">Команды бота</h2>
+  <ul class="mb-0">
+    <li><span class="mono">/start</span> — справка и показ ID чата.</li>
+    <li><span class="mono">/menu</span> — открыть главное меню бота с кнопками.</li>
+    <li><span class="mono">/chatid</span> — показать ID текущего чата (для вставки в настройки).</li>
+    <li><span class="mono">/run</span> — открыть инлайн-меню: выбрать агента, затем задачу.</li>
+    <li><span class="mono">/probe_offline</span> — поставить проверку/heartbeat-пробу для offline агентов.</li>
+    <li><span class="mono">/events_on</span> и <span class="mono">/events_off</span> — вкл/выкл дублирование событий из бота.</li>
+  </ul>
+</div>
+{% endblock %}

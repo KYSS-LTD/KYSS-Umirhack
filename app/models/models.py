@@ -56,6 +56,7 @@ class AgentProfile(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     agent_id: Mapped[int] = mapped_column(ForeignKey('agents.id'), unique=True, index=True)
     custom_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    group_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     agent: Mapped[Agent] = relationship('Agent')
@@ -103,3 +104,14 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     agent_id: Mapped[int | None] = mapped_column(ForeignKey('agents.id'), nullable=True)
     agent: Mapped[Agent | None] = relationship('Agent')
+
+
+class TelegramIntegrationSettings(Base):
+    __tablename__ = 'telegram_integration_settings'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    bot_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    events_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    events_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
