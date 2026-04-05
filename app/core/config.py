@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     task_execution_timeout_seconds: int = 30
     offline_probe_interval_seconds: int = 60
     offline_probe_cooldown_seconds: int = 300
+<<<<<<< HEAD
+=======
+    agent_max_parallel_tasks: int = 1
+    integration_api_key: str = ''
+>>>>>>> d576a5f4df7dd8c50a7abf7a0a1e89350c11d38d
 
     @property
     def allowed_command_set(self) -> set[str]:

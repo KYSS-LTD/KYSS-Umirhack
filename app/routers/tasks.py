@@ -1,7 +1,11 @@
 from datetime import datetime
 import asyncio
+<<<<<<< HEAD
+=======
+import difflib
+>>>>>>> d576a5f4df7dd8c50a7abf7a0a1e89350c11d38d
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -48,6 +52,52 @@ def create_task_endpoint(payload: TaskCreateRequest, request: Request, db: Sessi
         target_agent_id = agent.id
     task = create_task(db, payload.task_uid, payload.task_type, payload.command, agent_id=target_agent_id)
     return {'task_uid': task.task_uid, 'status': task.status.value}
+
+
+@router.post('/api/integrations/tasks')
+def create_task_integration(
+    payload: TaskCreateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    x_integration_key: str = Header(default=''),
+):
+    limit_request(request, scope='task-create-integration', limit=120)
+    if not settings.integration_api_key or x_integration_key != settings.integration_api_key:
+        raise HTTPException(status_code=401, detail='Invalid integration key')
+    if payload.task_type not in settings.allowed_task_type_set:
+        raise HTTPException(status_code=400, detail='Недопустимый тип задачи')
+    if payload.task_type == 'run_command' and payload.command not in settings.allowed_command_set:
+        raise HTTPException(status_code=400, detail='Команда не входит в белый список')
+    target_agent_id = None
+    if payload.agent_uid:
+        agent = get_agent_by_uid(db, payload.agent_uid)
+        if not agent:
+            raise HTTPException(status_code=404, detail='Агент не найден')
+        target_agent_id = agent.id
+    task = create_task(db, payload.task_uid, payload.task_type, payload.command, agent_id=target_agent_id)
+    return {'task_uid': task.task_uid, 'status': task.status.value, 'source': 'integration'}
+
+
+@router.get('/api/tasks/diff')
+def tasks_diff(
+    first_uid: str = Query(...),
+    second_uid: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    access = ensure_user_access(db, current_user)
+    if not (access.is_admin or access.can_view_agents):
+        raise HTTPException(status_code=403, detail='Недостаточно прав на просмотр задач')
+    first = get_task_by_uid(db, first_uid)
+    second = get_task_by_uid(db, second_uid)
+    if not first or not second:
+        raise HTTPException(status_code=404, detail='Одна из задач не найдена')
+    first_text = (first.result or first.logs or '').splitlines()
+    second_text = (second.result or second.logs or '').splitlines()
+    diff = '\n'.join(
+        difflib.unified_diff(first_text, second_text, fromfile=first.task_uid, tofile=second.task_uid, lineterm='')
+    )
+    return {'first_uid': first_uid, 'second_uid': second_uid, 'diff': diff}
 
 
 @router.post('/api/tasks/result')

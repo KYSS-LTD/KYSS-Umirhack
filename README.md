@@ -110,6 +110,25 @@ python agent/agent.py --base-url https://your-domain-or-host --registration-toke
 - `POST /api/agents/tasks/next` — получение задачи агентом.
 - `POST /api/tasks/result` — отправка результата задачи агентом.
 - `POST /api/tasks` — создание задачи пользователем (JWT).
+- `POST /api/integrations/tasks` — запуск задач из внешних систем по `X-Integration-Key`.
+- `GET /api/tasks/export?format=json|csv|pdf&limit=500` — экспорт результатов задач (JWT, права просмотра).
+- `GET /api/metrics/agents` — метрики по агентам (запуски за 24ч, ошибки, средняя длительность).
+- `GET /api/tasks/diff?first_uid=...&second_uid=...` — сравнение результатов двух запусков по unified diff.
+
+## Telegram интеграция (опционально)
+- Для администратора доступна страница `/settings/telegram`:
+  - `bot_token` бота;
+  - `chat_id` группы;
+  - `thread_id` (опционально, для групп с topics);
+  - переключатель дублирования `online/offline` событий.
+- Когда бот добавлен в группу, команда `/start` или `/chatid` покажет `chat_id`, который нужно вставить в настройки.
+- Команды бота:
+  - `/menu` — открыть главное инлайн-меню действий;
+  - `/run` — инлайн-меню: выбор агента и затем типа проверки;
+  - `/probe_offline` — поставить heartbeat-пробу для offline агентов (задачи выполнятся при восстановлении heartbeat);
+  - `/events_on` и `/events_off` — включить/выключить дублирование событий в чат.
+- При включённом дублировании в чат отправляются: события `online/offline` и завершение проверок (`done/failed`).
+- Backend автоматически ставит периодические `check_system_info` пробы для offline агентов (с cooldown), чтобы сразу проверить их после восстановления heartbeat.
 
 ## Telegram интеграция (опционально)
 - Для администратора доступна страница `/settings/telegram`:
@@ -141,6 +160,10 @@ python agent/agent.py --base-url https://your-domain-or-host --registration-toke
 - при `401 Unauthorized` агент сам перерегистрируется и обновляет `agent_token`;
 - базовый retry задачи при fail (`max_retries=1` по умолчанию);
 - timeout выполнения задач на агенте.
+- ограничение параллельных задач на одном агенте (`AGENT_MAX_PARALLEL_TASKS`, по умолчанию 1).
+- в дашборде отображается рейтинг агентов по стабильности и скорости выполнения.
+- пресеты ролей пользователей в UI: `observer`, `operator`, `administrator`.
+- поддерживаются группы агентов (сегмент/площадка) через профиль агента и фильтр по группе в дашборде.
 
 ## Новые task types (итерация N)
 ### Системные

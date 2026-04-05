@@ -82,7 +82,7 @@ def next_task(
     mark_offline_agents(db, offline_seconds=settings.agent_offline_seconds)
     fail_running_tasks_for_offline_agents(db)
     fail_stale_running_tasks(db, timeout_seconds=settings.task_execution_timeout_seconds)
-    task = get_next_task_for_agent(db, agent)
+    task = get_next_task_for_agent(db, agent, max_parallel_tasks=settings.agent_max_parallel_tasks)
     if not task:
         return {'task': None}
     return {

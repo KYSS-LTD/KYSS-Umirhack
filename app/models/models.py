@@ -56,6 +56,7 @@ class AgentProfile(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     agent_id: Mapped[int] = mapped_column(ForeignKey('agents.id'), unique=True, index=True)
     custom_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    group_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     agent: Mapped[Agent] = relationship('Agent')

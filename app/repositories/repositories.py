@@ -170,7 +170,15 @@ def create_task(db: Session, task_uid: str, task_type: str, command: str | None,
     return task
 
 
-def get_next_task_for_agent(db: Session, agent: Agent) -> Task | None:
+def get_next_task_for_agent(db: Session, agent: Agent, max_parallel_tasks: int = 1) -> Task | None:
+    if max_parallel_tasks > 0:
+        running_count = (
+            db.query(Task)
+            .filter(Task.agent_id == agent.id, Task.status == TaskStatus.running)
+            .count()
+        )
+        if running_count >= max_parallel_tasks:
+            return None
     task = (
         db.query(Task)
         .filter(Task.status == TaskStatus.pending)
