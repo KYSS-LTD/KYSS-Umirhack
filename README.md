@@ -217,7 +217,3 @@ python agent/agent.py --base-url https://your-domain-or-host --registration-toke
   "agent_uid": "agent-1"
 }
 ```
-
-## Changelog (что было / что стало)
-- Было: только базовые проверки (`check_cpu/check_ram/check_disk/check_ports/check_system_info`) и статичная схема топологии.
-- Стало: расширенные системные/сетевые/service/security/snapshot-проверки, JSON summary (`OK/WARN/CRIT`), diff состояния, polling топологии каждые 4 секунды с heartbeat-анимацией.
