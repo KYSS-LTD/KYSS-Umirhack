@@ -63,4 +63,4 @@ docker compose logs -f kyss-agent
 ```bash
 docker compose pull && docker compose up -d
 ```
-(или `--build`, если пакет изменён локально)
+(или `--build`, если пакет изменён локально).
